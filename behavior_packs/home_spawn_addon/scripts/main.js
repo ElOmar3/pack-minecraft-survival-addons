@@ -505,10 +505,10 @@ function registerCustomCommands() {
       }
 
       if (LEGACY_MODERATION_MODE === "ENABLED") {
-        for (const name of ["ban", "vetar", "bloquear"]) {
+        for (const name of ["vetar", "ban"]) {
           register({
             name: `${COMMAND_NAMESPACE}:${name}`,
-            description: "Banea/veta a un jugador del servidor",
+            description: "Veta permanentemente a un jugador",
             permissionLevel: ADMIN_PERMISSION,
             mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
             optionalParameters: [{ name: "motivo", type: CustomCommandParamType.String }],
@@ -525,7 +525,7 @@ function registerCustomCommands() {
           });
         }
 
-        for (const name of ["tempban", "vetartemporal", "bloqueartemporal"]) {
+        for (const name of ["vetartemporal", "tempban"]) {
           register({
             name: `${COMMAND_NAMESPACE}:${name}`,
             description: "Veta temporalmente a un jugador",
@@ -548,10 +548,10 @@ function registerCustomCommands() {
           });
         }
 
-        for (const name of ["unban", "desvetar", "desbloquear"]) {
+        for (const name of ["desvetar", "unban"]) {
           register({
             name: `${COMMAND_NAMESPACE}:${name}`,
-            description: "Desveta a un jugador del servidor",
+            description: "Retira el veto a un jugador",
             permissionLevel: ADMIN_PERMISSION,
             mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
           }, (origin, jugador) => {
@@ -565,10 +565,10 @@ function registerCustomCommands() {
           });
         }
 
-        for (const name of ["mute", "silenciar"]) {
+        for (const name of ["silenciar", "mute"]) {
           register({
             name: `${COMMAND_NAMESPACE}:${name}`,
-            description: "Silencia a un jugador en el chat",
+            description: "Silencia temporalmente a un jugador",
             permissionLevel: ADMIN_PERMISSION,
             mandatoryParameters: [
               { name: "jugador", type: CustomCommandParamType.String },
@@ -588,10 +588,10 @@ function registerCustomCommands() {
           });
         }
 
-        for (const name of ["unmute", "dessilenciar"]) {
+        for (const name of ["dessilenciar", "unmute"]) {
           register({
             name: `${COMMAND_NAMESPACE}:${name}`,
-            description: "Quita el silencio a un jugador",
+            description: "Retira el silencio a un jugador",
             permissionLevel: ADMIN_PERMISSION,
             mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
           }, (origin, jugador) => {
@@ -605,7 +605,7 @@ function registerCustomCommands() {
           });
         }
       } else if (LEGACY_MODERATION_MODE === "SHADOWED") {
-        for (const name of ["unban", "unmute", "desvetar", "dessilenciar"]) {
+        for (const name of ["desvetar", "unban", "dessilenciar", "unmute"]) {
           register({
             name: `${COMMAND_NAMESPACE}:${name}`,
             description: `Redirección FCX para ${name}`,
@@ -619,10 +619,10 @@ function registerCustomCommands() {
         }
       }
 
-      for (const name of ["removernpcs", "borrarnpcs", "eliminarnpcs"]) {
+      for (const name of ["borrarnpcs", "removernpcs"]) {
         register({
           name: `${COMMAND_NAMESPACE}:${name}`,
-          description: "Remueve NPCs cercanos",
+          description: "Remueve NPCs cercanos de soporte",
           permissionLevel: ADMIN_PERMISSION,
           optionalParameters: [{ name: "radio", type: CustomCommandParamType.Integer }],
         }, (origin, radio) => {
@@ -638,7 +638,7 @@ function registerCustomCommands() {
         });
       }
 
-      for (const name of ["adminlist", "listastaff", "listaadmin"]) {
+      for (const name of ["listastaff", "adminlist"]) {
         register({
           name: `${COMMAND_NAMESPACE}:${name}`,
           description: "Lista histórica de jugadores y XUID",
@@ -655,12 +655,6 @@ function registerCustomCommands() {
           return commandOk(`Procesando ${name}.`);
         });
       }
-        if (filtro !== undefined && filtro !== null && String(filtro).trim()) args.push(String(filtro));
-        system.run(async () => {
-          await handleCommand(sender, "adminlist", args);
-        });
-        return commandOk("Procesando adminlist.");
-      });
     } catch (e) { ErrorReporter.report(e, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
       console.warn("[Home and Spawn Addon] Error registrando custom commands: " + e);
     }

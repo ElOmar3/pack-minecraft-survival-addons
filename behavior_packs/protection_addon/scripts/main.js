@@ -2606,7 +2606,6 @@ function registerCustomCommands() {
           return commandOk(`Procesando ${name}.`);
         });
       }
-      }
 
       register({
         name: `${COMMAND_NAMESPACE}:zona`,

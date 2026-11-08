@@ -368,7 +368,6 @@ function registerCustomCommands() {
           return commandOk(`Procesando ${name}.`);
         });
       }
-      });
     } catch (e) { ErrorReporter.report(e, { addonId: "crates_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
       console.warn("[Crates Addon] Error registrando custom commands: " + e);
     }
