@@ -506,7 +506,7 @@ const ALL_COMMANDS = [
   { name: "/s:dinero", desc: "Consulta tu saldo actual", cmd: "s:dinero", cat: "Economía" },
   { name: "/s:pagar <jugador>", desc: "Paga dinero a otro jugador", form: openPayForm, cat: "Economía" },
   { name: "/s:tienda", desc: "Abre la tienda oficial del servidor", cmd: "s:tienda", cat: "Economía" },
-  { name: "/s:vetarco", desc: "Accede al Banco General y tus ahorros", cmd: "s:banco", cat: "Economía" },
+  { name: "/s:banco", desc: "Accede al Banco General y tus ahorros", cmd: "s:banco", cat: "Economía" },
   { name: "/s:potenciadores", desc: "Consulta o activa mejoras globales del servidor", cmd: "s:potenciadores", cat: "Economía" },
   { name: "/s:recompensas", desc: "Reclama recompensas diarias y periódicas", cmd: "s:recompensas", cat: "Economía" },
   { name: "/s:kitinicial", desc: "Reclama el kit inicial de bienvenida", cmd: "s:kitinicial", cat: "Economía" },
@@ -515,6 +515,7 @@ const ALL_COMMANDS = [
   { name: "/s:expedicion", desc: "Consulta el Guardián y reclama recompensas", cmd: "s:expedicion", cat: "Eventos" },
   { name: "/s:adminexpedicion", desc: "OP: configura e inicia el Guardián", cmd: "s:adminexpedicion", cat: "Administración" },
   { name: "/s:titulos", desc: "Tienda y gestor de títulos cosméticos", cmd: "s:titulos", cat: "Economía" },
+  { name: "/s:rankup", desc: "Asciende en el escalafón de supervivencia con tiempo y dinero", cmd: "s:rankup", cat: "Economía" },
   { name: "/s:casino", desc: "Zona de juegos, apuestas y entretenimiento", cmd: "s:casino", cat: "Economía" },
   
   { name: "/s:subastas", desc: "Abre la casa de subastas de la comunidad", cmd: "s:subastas", cat: "Comercio" },
@@ -687,6 +688,7 @@ function openMoneyMenu(player) {
     .button("💼 §aTrabajos y Empleos (/s:trabajos)")
     .button("📜 §aMisiones (/s:misiones)")
     .button("🏷️ §aTítulos Cosméticos (/s:titulos)")
+    .button("⭐ §6Ascenso de Rango (/s:rankup)")
     .button("🎰 §cCasino / Apuestas (/s:casino)")
     .button("❌ §8Cerrar Menú");
 
@@ -702,7 +704,8 @@ function openMoneyMenu(player) {
     else if (idx === 7) runCommandSafe(player, "s:trabajos");
     else if (idx === 8) runCommandSafe(player, "s:misiones");
     else if (idx === 9) runCommandSafe(player, "s:titulos");
-    else if (idx === 10) runCommandSafe(player, "s:casino");
+    else if (idx === 10) runCommandSafe(player, "s:rankup");
+    else if (idx === 11) runCommandSafe(player, "s:casino");
   }, undefined);
 }
 
