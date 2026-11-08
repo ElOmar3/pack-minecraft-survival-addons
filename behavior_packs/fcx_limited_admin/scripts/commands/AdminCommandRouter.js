@@ -64,14 +64,18 @@ export class AdminCommandRouter {
 
   registerModeration(registry) {
     const definitions = [
-      ["warn", Capability.PLAYER_WARN, false], ["mute", Capability.PLAYER_MUTE, true],
-      ["kick", Capability.PLAYER_KICK, false], ["tempban", Capability.PLAYER_TEMPBAN, true],
-      ["ban", Capability.PLAYER_PERMABAN, false], ["desban", Capability.PLAYER_UNBAN, false], ["freeze", Capability.PLAYER_FREEZE, true]
+      ["warn", Capability.PLAYER_WARN, false], ["advertir", Capability.PLAYER_WARN, false],
+      ["mute", Capability.PLAYER_MUTE, true], ["silenciar", Capability.PLAYER_MUTE, true],
+      ["kick", Capability.PLAYER_KICK, false], ["expulsar", Capability.PLAYER_KICK, false],
+      ["tempban", Capability.PLAYER_TEMPBAN, true], ["vetartemporal", Capability.PLAYER_TEMPBAN, true],
+      ["ban", Capability.PLAYER_PERMABAN, false], ["vetar", Capability.PLAYER_PERMABAN, false],
+      ["desban", Capability.PLAYER_UNBAN, false], ["desvetar", Capability.PLAYER_UNBAN, false],
+      ["freeze", Capability.PLAYER_FREEZE, true], ["congelar", Capability.PLAYER_FREEZE, true]
     ];
     for (const [name, capability, hasDuration] of definitions) {
       const mandatoryParameters = [stringParam("jugador")];
       if (hasDuration) mandatoryParameters.push(stringParam("duracion"));
-      if (name !== "desban") mandatoryParameters.push(stringParam("motivo"));
+      if (name !== "desban" && name !== "desvetar") mandatoryParameters.push(stringParam("motivo"));
       this.register(registry, { name: `${NS}:${name}`, description: `FCX ${name}`, permissionLevel: CommandPermissionLevel.Any, mandatoryParameters }, (origin, ...args) => {
         const source = this.source(origin); if (!source.ok) return failure("Solo para jugadores.");
         this.system.run(() => this.prepareModeration(source.player, name, capability, args.map(String), hasDuration));
@@ -81,10 +85,10 @@ export class AdminCommandRouter {
   }
 
   registerQueries(registry) {
-    for (const name of ["reports","audit"]) {
+    for (const name of ["reports", "reportes", "audit", "auditoria"]) {
       this.register(registry, { name: `${NS}:${name}`, description: `FCX ${name}`, permissionLevel: CommandPermissionLevel.Any }, (origin) => {
         const source = this.source(origin); if (!source.ok) return failure("Solo para jugadores.");
-        this.system.run(() => name === "reports" ? this.services.panel.showReports(source.player) : this.services.panel.showAudit(source.player));
+        this.system.run(() => (name === "reports" || name === "reportes") ? this.services.panel.showReports(source.player) : this.services.panel.showAudit(source.player));
         return success("Consulta FCX recibida.");
       });
     }
@@ -96,18 +100,25 @@ export class AdminCommandRouter {
       this.system.run(() => this.handleRoles(source.player, String(action ?? "view"), String(jugador ?? ""), String(rol ?? "")));
       return success("Solicitud de roles recibida.");
     });
-    this.register(registry, {
-      name: `${NS}:lockdown`, description: "Lockdown FCX", permissionLevel: CommandPermissionLevel.Any,
-      mandatoryParameters: [stringParam("estado")]
-    }, (origin, estado) => {
-      const source = this.source(origin); if (!source.ok) return failure("Solo para jugadores.");
-      this.system.run(() => this.handleLockdown(source.player, String(estado)));
-      return success("Solicitud de lockdown recibida.");
-    });
+    for (const name of ["lockdown", "bloqueototal"]) {
+      this.register(registry, {
+        name: `${NS}:${name}`, description: "Lockdown / Bloqueo total FCX", permissionLevel: CommandPermissionLevel.Any,
+        mandatoryParameters: [stringParam("estado")]
+      }, (origin, estado) => {
+        const source = this.source(origin); if (!source.ok) return failure("Solo para jugadores.");
+        this.system.run(() => this.handleLockdown(source.player, String(estado)));
+        return success("Solicitud de lockdown recibida.");
+      });
+    }
   }
 
   handleAdmin(player, action, args) {
-    const normalized = action.trim().toLowerCase();
+    let normalized = action.trim().toLowerCase();
+    if (normalized === "inspeccionar" || normalized === "jugador") normalized = "player";
+    if (normalized === "teletransportar") normalized = "teleport";
+    if (normalized === "espectar" || normalized === "observar") normalized = "spectate";
+    if (normalized === "dejardeespectar" || normalized === "dejarobservar") normalized = "stopspectate";
+
     if (normalized === "enroll-owner") return this.services.panel.message(player, this.services.ownerEnrollment.enroll(player, args[0]), "OWNER registrado; lockdown permanece activo.");
     if (normalized === "panel" || normalized === "") return this.services.panel.open(player);
     if (normalized === "player" || normalized === "inspect") {
@@ -130,7 +141,16 @@ export class AdminCommandRouter {
     player.sendMessage("§c[FCX Admin] Subcomando desconocido.");
   }
 
-  prepareModeration(player, action, capability, args, hasDuration) {
+  prepareModeration(player, rawAction, capability, args, hasDuration) {
+    let action = rawAction;
+    if (action === "advertir") action = "warn";
+    if (action === "silenciar") action = "mute";
+    if (action === "expulsar") action = "kick";
+    if (action === "vetartemporal") action = "tempban";
+    if (action === "vetar") action = "ban";
+    if (action === "desvetar") action = "desban";
+    if (action === "congelar") action = "freeze";
+
     const supportsOfflineTarget = action === "tempban" || action === "ban" || action === "desban";
     const targetResult = this.services.moderation.findPlayer(args[0], { allowOffline: supportsOfflineTarget });
     if (!targetResult.ok) return this.services.panel.message(player, targetResult);

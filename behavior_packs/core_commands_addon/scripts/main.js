@@ -213,15 +213,15 @@ function sendHelp(sender) {
   reply(sender, "§7Construye, comercia y convive con respeto. Lee §e/s:reglas§7.");
   reply(sender, "§7Usa §e/s:help§7 o §e/s:ayuda§7 cuando quieras volver a ver esta guía.");
   reply(sender, "§a1. Movimiento y viaje");
-  reply(sender, "§e/s:sethome§7 guarda tu base actual y §e/s:home§7 te lleva de vuelta.");
-  reply(sender, "§e/s:spawn§7 te envía al spawn global del servidor.");
+  reply(sender, "§e/s:guardarcasa§7 guarda tu base actual y §e/s:casa§7 te lleva de vuelta.");
+  reply(sender, "§e/s:aparicion§7 te envía al spawn global del servidor.");
   reply(sender, "§e/s:tpa <jugador>§7 pide teletransporte a otro jugador.");
-  reply(sender, "§e/s:tpaccept§7 acepta una solicitud y §e/s:tpdeny§7 la rechaza.");
-  reply(sender, "§e/s:warps§7 abre el menú de warps públicos del servidor.");
+  reply(sender, "§e/s:tpaaceptar§7 acepta una solicitud y §e/s:tparechazar§7 la rechaza.");
+  reply(sender, "§e/s:destinos§7 abre el menú de warps públicos del servidor.");
   reply(sender, "§e/s:rtp§7 busca una zona aleatoria segura con enfriamiento.");
   reply(sender, "§a2. Dinero, tienda y progreso");
   reply(sender, "§e/s:dinero§7, §e/s:money§7 y §e/s:bal§7 muestran tu saldo.");
-  reply(sender, "§e/s:pay <jugador> <cantidad>§7 transfiere dinero a otro jugador.");
+  reply(sender, "§e/s:pagar <jugador> <cantidad>§7 transfiere dinero a otro jugador.");
   reply(sender, "§e/s:tienda§7 o §e/s:shop§7 abre la tienda principal.");
   reply(sender, "§e/s:casino§7 abre apuestas y minijuegos. Úsalo bajo tu propio riesgo.");
   reply(sender, "§e/s:recompensas§7 reclama premios por conexión y kits disponibles.");
@@ -232,8 +232,8 @@ function sendHelp(sender) {
   reply(sender, "§7Todas las menas naturales pagan dinero; las menas colocadas o movidas no cuentan.");
   reply(sender, "§e/s:titulos§7 o §e/s:titles§7 permite comprar y equipar títulos cosméticos.");
   reply(sender, "§a3. Comercio y mercado");
-  reply(sender, "§e/s:trade <jugador>§7 inicia un intercambio seguro entre dos jugadores.");
-  reply(sender, "§e/s:tradeaccept§7 acepta el intercambio y §e/s:tradedeny§7 lo rechaza.");
+  reply(sender, "§e/s:comerciar <jugador>§7 inicia un intercambio seguro entre dos jugadores.");
+  reply(sender, "§e/s:aceptartrato§7 acepta el intercambio y §e/s:rechazartrato§7 lo rechaza.");
   reply(sender, "§e/s:subastas§7 o §e/s:ah§7 abre la casa de subastas.");
   reply(sender, "§e/s:vender <precio>§7 publica el objeto de tu mano en subasta.");
   reply(sender, "§a4. Terrenos y seguridad");
@@ -242,13 +242,13 @@ function sendHelp(sender) {
   reply(sender, "§7Costo: §a$2,000 + $4 por bloque horizontal§7. Máximo: §e100x100§7.");
   reply(sender, "§7Cuadrados: §f10x10 §a$2,400§7 | §f20x20 §a$3,600§7 | §f30x30 §a$5,600§7 | §f40x40 §a$8,400§7 | §f50x50 §a$12,000§7.");
   reply(sender, "§7Cuadrados: §f60x60 §a$16,400§7 | §f70x70 §a$21,600§7 | §f80x80 §a$27,600§7 | §f90x90 §a$34,400§7 | §f100x100 §a$42,000§7.");
-  reply(sender, "§e/s:zona trust <jugador>§7 da acceso y §e/s:zona untrust <jugador>§7 lo quita.");
+  reply(sender, "§e/s:zona confiar <jugador>§7 da acceso y §e/s:zona desconfiar <jugador>§7 lo quita.");
   reply(sender, "§e/s:zonas§7 abre el gestor visual de tus terrenos.");
   reply(sender, "§a5. Clanes y duelos voluntarios");
   reply(sender, "§e/s:clan help§7 muestra todos los subcomandos del sistema de clanes.");
   reply(sender, "§e/s:c <mensaje>§7 envía un mensaje privado solo a tu clan.");
   reply(sender, "§e/s:coliseopvp <jugador> [coliseo]§7 solicita un duelo opcional por consentimiento mutuo.");
-  reply(sender, "§e/s:coliseoaccept§7 acepta el duelo y §e/s:coliseodeny§7 lo rechaza.");
+  reply(sender, "§e/s:dueloaceptar§7 acepta el duelo y §e/s:duelorechazar§7 lo rechaza.");
   reply(sender, "§7Los clanes son cooperativos y no permiten fuego amigo. Los duelos de coliseo son voluntarios, restauran destrucción y devuelven a cada jugador a su lugar original.");
   reply(sender, "§a6. Utilidades");
   reply(sender, "§e/s:tumba§7 muestra la ubicación de tu última muerte; §e/s:tumbatp§7 te lleva a tu tumba activa.");
@@ -256,13 +256,13 @@ function sendHelp(sender) {
   reply(sender, "§e/s:reglas§7 abre las reglas comunitarias. §e/s:guias§7 abre la guía visual.");
   if (isPlayerOp(sender)) {
     reply(sender, "§a7. Administración");
-    reply(sender, "§e/s:setspawn§7 define el spawn principal del servidor.");
-    reply(sender, "§e/s:ban§7, §e/s:unban§7, §e/s:mute§7 y §e/s:unmute§7 sirven para moderación.");
+    reply(sender, "§e/s:fijaraparicion§7 define el spawn principal del servidor.");
+    reply(sender, "§e/s:vetar§7, §e/s:desvetar§7, §e/s:silenciar§7 y §e/s:dessilenciar§7 sirven para moderación.");
     reply(sender, "§e/s:limpiar§7 limpia ítems del suelo. §e/s:removernpcs [radio]§7 borra NPCs cercanos.");
-    reply(sender, "§e/s:hordastart§7 y §e/s:fiebrestart§7 fuerzan eventos automáticos.");
-    reply(sender, "§e/s:setcrate§7, §e/s:delcrate§7 y §e/s:givekey§7 administran crates y llaves.");
+    reply(sender, "§e/s:iniciarhorda§7 y §e/s:iniciarfiebre§7 fuerzan eventos automáticos.");
+    reply(sender, "§e/s:fijarcaja§7, §e/s:borrarcaja§7 y §e/s:darllave§7 administran crates y llaves.");
     reply(sender, "§e/s:maquinatrabajo§7 o §e/s:trabajosnpc§7 crean una estación de trabajos.");
-    reply(sender, "§e/s:setwarp <nombre>§7 y §e/s:delwarp <nombre>§7 administran warps.");
+    reply(sender, "§e/s:fijardestino <nombre>§7 y §e/s:borrardestino <nombre>§7 administran warps.");
     reply(sender, "§e/s:adminproteger <nombre>§7 crea safezones administrativas.");
     reply(sender, "§e/s:admineliminar <nombre>§7 elimina safezones o coliseos administrativos.");
     reply(sender, "§e/s:admincoliseo <nombre>§7 crea un coliseo PvP.");
@@ -494,50 +494,52 @@ function getOtherPlayers(player) {
 
 // Listado de todos los comandos para el buscador integrado
 const ALL_COMMANDS = [
-  { name: "/s:home", desc: "Teletranspórtate a tu casa", cmd: "s:home", cat: "Viajes" },
-  { name: "/s:sethome", desc: "Establece tu ubicación de casa", cmd: "s:sethome", cat: "Viajes" },
-  { name: "/s:spawn", desc: "Ve al Spawn global del servidor", cmd: "s:spawn", cat: "Viajes" },
-  { name: "/s:rtp", desc: "Teletransporte aleatorio seguro", cmd: "s:rtp", cat: "Viajes" },
-  { name: "/s:warps", desc: "Abre el menú de warps públicos", cmd: "s:warps", cat: "Viajes" },
+  { name: "/s:casa", desc: "Teletranspórtate a tu casa principal", cmd: "s:casa", cat: "Viajes" },
+  { name: "/s:guardarcasa", desc: "Establece tu ubicación de casa actual", cmd: "s:guardarcasa", cat: "Viajes" },
+  { name: "/s:aparicion", desc: "Ve a la zona de aparición global del servidor", cmd: "s:aparicion", cat: "Viajes" },
+  { name: "/s:rtp", desc: "Teletransporte aleatorio a una zona segura", cmd: "s:rtp", cat: "Viajes" },
+  { name: "/s:destinos", desc: "Abre el menú de destinos y puntos públicos", cmd: "s:destinos", cat: "Viajes" },
   { name: "/s:tpa <jugador>", desc: "Solicita teletransporte a un jugador", form: openTpaForm, cat: "Viajes" },
-  { name: "/s:tpaccept", desc: "Acepta solicitud de teletransporte", cmd: "s:tpaccept", cat: "Viajes" },
-  { name: "/s:tpdeny", desc: "Rechaza solicitud de teletransporte", cmd: "s:tpdeny", cat: "Viajes" },
+  { name: "/s:tpaaceptar", desc: "Acepta una solicitud de teletransporte", cmd: "s:tpaaceptar", cat: "Viajes" },
+  { name: "/s:tparechazar", desc: "Rechaza una solicitud de teletransporte", cmd: "s:tparechazar", cat: "Viajes" },
   
   { name: "/s:dinero", desc: "Consulta tu saldo actual", cmd: "s:dinero", cat: "Economía" },
-  { name: "/s:pay <jugador>", desc: "Paga dinero a otro jugador", form: openPayForm, cat: "Economía" },
-  { name: "/s:tienda", desc: "Abre la tienda del servidor", cmd: "s:tienda", cat: "Economía" },
-  { name: "/s:recompensas", desc: "Reclama recompensas diarias", cmd: "s:recompensas", cat: "Economía" },
-  { name: "/s:kitinicial", desc: "Reclama el kit inicial único", cmd: "s:kitinicial", cat: "Economía" },
-  { name: "/s:trabajos", desc: "Abre el menú de trabajos", cmd: "s:trabajos", cat: "Economía" },
-  { name: "/s:misiones", desc: "Abre el panel de misiones", cmd: "s:misiones", cat: "Economía" },
+  { name: "/s:pagar <jugador>", desc: "Paga dinero a otro jugador", form: openPayForm, cat: "Economía" },
+  { name: "/s:tienda", desc: "Abre la tienda oficial del servidor", cmd: "s:tienda", cat: "Economía" },
+  { name: "/s:vetarco", desc: "Accede al Banco General y tus ahorros", cmd: "s:banco", cat: "Economía" },
+  { name: "/s:potenciadores", desc: "Consulta o activa mejoras globales del servidor", cmd: "s:potenciadores", cat: "Economía" },
+  { name: "/s:recompensas", desc: "Reclama recompensas diarias y periódicas", cmd: "s:recompensas", cat: "Economía" },
+  { name: "/s:kitinicial", desc: "Reclama el kit inicial de bienvenida", cmd: "s:kitinicial", cat: "Economía" },
+  { name: "/s:trabajos", desc: "Abre el gremio de empleos y pedidos", cmd: "s:trabajos", cat: "Economía" },
+  { name: "/s:misiones", desc: "Abre el panel de misiones secundarias", cmd: "s:misiones", cat: "Economía" },
   { name: "/s:expedicion", desc: "Consulta el Guardián y reclama recompensas", cmd: "s:expedicion", cat: "Eventos" },
   { name: "/s:adminexpedicion", desc: "OP: configura e inicia el Guardián", cmd: "s:adminexpedicion", cat: "Administración" },
   { name: "/s:titulos", desc: "Tienda y gestor de títulos cosméticos", cmd: "s:titulos", cat: "Economía" },
-  { name: "/s:casino", desc: "Zona de juegos y apuestas", cmd: "s:casino", cat: "Economía" },
+  { name: "/s:casino", desc: "Zona de juegos, apuestas y entretenimiento", cmd: "s:casino", cat: "Economía" },
   
-  { name: "/s:subastas", desc: "Abre la casa de subastas", cmd: "s:subastas", cat: "Comercio" },
+  { name: "/s:subastas", desc: "Abre la casa de subastas de la comunidad", cmd: "s:subastas", cat: "Comercio" },
   { name: "/s:vender <precio>", desc: "Sube el ítem en tu mano a subasta", form: openVenderForm, cat: "Comercio" },
-  { name: "/s:trade <jugador>", desc: "Solicita intercambio directo", form: openTradeForm, cat: "Comercio" },
-  { name: "/s:tradeaccept", desc: "Acepta solicitud de intercambio", cmd: "s:tradeaccept", cat: "Comercio" },
-  { name: "/s:tradedeny", desc: "Rechaza solicitud de intercambio", cmd: "s:tradedeny", cat: "Comercio" },
+  { name: "/s:comerciar <jugador>", desc: "Solicita un intercambio directo seguro", form: openTradeForm, cat: "Comercio" },
+  { name: "/s:aceptartrato", desc: "Acepta solicitud de intercambio", cmd: "s:aceptartrato", cat: "Comercio" },
+  { name: "/s:rechazartrato", desc: "Rechaza solicitud de intercambio", cmd: "s:rechazartrato", cat: "Comercio" },
   
-  { name: "/s:zonas", desc: "Gestor visual de tus protecciones", cmd: "s:zonas", cat: "Protecciones" },
+  { name: "/s:zonas", desc: "Gestor visual de tus terrenos protegidos", cmd: "s:zonas", cat: "Protecciones" },
   { name: "/s:proteger <nombre>", desc: "Crea una nueva zona protegida", form: openProtegerForm, cat: "Protecciones" },
   { name: "/s:desproteger", desc: "Elimina la protección del terreno actual", cmd: "s:desproteger", cat: "Protecciones" },
-  { name: "/s:zona trust <jugador>", desc: "Añade a un amigo a tu terreno", form: (p) => openTrustForm(p, true), cat: "Protecciones" },
-  { name: "/s:zona untrust <jugador>", desc: "Quita el acceso de un amigo a tu terreno", form: (p) => openTrustForm(p, false), cat: "Protecciones" },
+  { name: "/s:zona confiar <jugador>", desc: "Añade a un amigo a tu terreno", form: (p) => openTrustForm(p, true), cat: "Protecciones" },
+  { name: "/s:zona desconfiar <jugador>", desc: "Quita el acceso de un amigo a tu terreno", form: (p) => openTrustForm(p, false), cat: "Protecciones" },
   { name: "/s:pos1", desc: "Marca la primera esquina del terreno", cmd: "s:pos1", cat: "Protecciones" },
   { name: "/s:pos2", desc: "Marca la segunda esquina del terreno", cmd: "s:pos2", cat: "Protecciones" },
   
-  { name: "/s:clan help", desc: "Comandos de gestión de clan", cmd: "s:clan help", cat: "Clanes" },
-  { name: "/s:c <mensaje>", desc: "Chat privado con tu clan", form: openClanChatForm, cat: "Clanes" },
-  { name: "/s:coliseopvp <jugador>", desc: "Desafía a un duelo en coliseo", form: openDuelForm, cat: "Clanes" },
-  { name: "/s:coliseoaccept", desc: "Acepta el duelo pvp", cmd: "s:coliseoaccept", cat: "Clanes" },
-  { name: "/s:coliseodeny", desc: "Rechaza el duelo pvp", cmd: "s:coliseodeny", cat: "Clanes" },
+  { name: "/s:clan ayuda", desc: "Comandos de gestión de clan", cmd: "s:clan ayuda", cat: "Clanes" },
+  { name: "/s:c <mensaje>", desc: "Chat privado con los miembros de tu clan", form: openClanChatForm, cat: "Clanes" },
+  { name: "/s:duelo <jugador>", desc: "Desafía a un duelo formal en el coliseo", form: openDuelForm, cat: "Clanes" },
+  { name: "/s:dueloaceptar", desc: "Acepta un duelo en el coliseo", cmd: "s:dueloaceptar", cat: "Clanes" },
+  { name: "/s:duelorechazar", desc: "Rechaza un duelo en el coliseo", cmd: "s:duelorechazar", cat: "Clanes" },
   
   { name: "/s:tumba", desc: "Muestra coordenadas de tu última muerte", cmd: "s:tumba", cat: "Utilidades" },
-  { name: "/s:tumbatp", desc: "Va a tu tumba activa", cmd: "s:tumbatp", cat: "Utilidades" },
-  { name: "/s:camara", desc: "Activa/desactiva cámara automática", cmd: "s:camara", cat: "Utilidades" },
+  { name: "/s:tumbatp", desc: "Teletranspórtate a tu tumba activa", cmd: "s:tumbatp", cat: "Utilidades" },
+  { name: "/s:camara", desc: "Activa o desactiva la cámara automática", cmd: "s:camara", cat: "Utilidades" },
   { name: "/s:reglas", desc: "Muestra las normas de convivencia", cmd: "s:reglas", cat: "Utilidades" },
   { name: "/s:guias", desc: "Guías visuales del servidor", cmd: "s:guias", cat: "Utilidades" },
   { name: "/s:tebex", desc: "Genera tu código de la tienda web", cmd: "s:tebex", cat: "Utilidades" }
@@ -598,9 +600,9 @@ function openMainMenu(player) {
   const form = new ActionFormData()
     .title("§e🧭 MENÚ PRINCIPAL §r")
     .body("§7Selecciona un servicio de la comunidad:")
-    .button("🚀 Movimiento y Viajes\n§8/s:home, /s:spawn, /s:rtp...")
+    .button("🚀 Movimiento y Viajes\n§8/s:casa, /s:aparicion, /s:rtp...")
     .button("💰 Dinero y Economía\n§8/s:dinero, tienda, trabajos...")
-    .button("🤝 Comercio y Subastas\n§8/s:subastas, /s:trade...")
+    .button("🤝 Comercio y Subastas\n§8/s:subastas, /s:comerciar...")
     .button("🛡️ Terrenos y Protecciones\n§8/s:proteger, /s:zonas...")
     .button("⚔️ Clanes y Coliseo\n§8/s:clan, duelos...")
     .button("⚙️ Utilidades y Reglas\n§8/s:tumba, reglas, guías...")
@@ -630,26 +632,26 @@ function openTravelMenu(player) {
   const form = new ActionFormData()
     .title("§e🚀 MOVIMIENTO Y VIAJE 🚀")
     .body("§7Teletranspórtate por el mapa de manera segura.")
-    .button("🏠 §9Ir a mi casa (/s:home)")
-    .button("📍 §9Guardar mi ubicación (/s:sethome)")
-    .button("🌍 §9Ir al Spawn global (/s:spawn)")
+    .button("🏠 §9Ir a mi casa (/s:casa)")
+    .button("📍 §9Guardar mi ubicación (/s:guardarcasa)")
+    .button("🌍 §9Ir a la Aparición (/s:aparicion)")
     .button("🎲 §9Teletransporte aleatorio (/s:rtp)")
-    .button("🚩 §9Warps públicos (/s:warps)")
+    .button("🚩 §9Destinos públicos (/s:destinos)")
     .button("👥 §9Pedir TPA a Jugador")
-    .button("✅ §2Aceptar TPA (/s:tpaccept)")
-    .button("❌ §cRechazar TPA (/s:tpdeny)")
+    .button("✅ §2Aceptar TPA (/s:tpaaceptar)")
+    .button("❌ §cRechazar TPA (/s:tparechazar)")
     .button("❌ §8Cerrar Menú");
 
   safeOpenForm(player, form, (response) => {
     const idx = response.selection;
-    if (idx === 0) runCommandSafe(player, "s:home");
-    else if (idx === 1) runCommandSafe(player, "s:sethome");
-    else if (idx === 2) runCommandSafe(player, "s:spawn");
+    if (idx === 0) runCommandSafe(player, "s:casa");
+    else if (idx === 1) runCommandSafe(player, "s:guardarcasa");
+    else if (idx === 2) runCommandSafe(player, "s:aparicion");
     else if (idx === 3) runCommandSafe(player, "s:rtp");
-    else if (idx === 4) runCommandSafe(player, "s:warps");
+    else if (idx === 4) runCommandSafe(player, "s:destinos");
     else if (idx === 5) openTpaForm(player);
-    else if (idx === 6) runCommandSafe(player, "s:tpaccept");
-    else if (idx === 7) runCommandSafe(player, "s:tpdeny");
+    else if (idx === 6) runCommandSafe(player, "s:tpaaceptar");
+    else if (idx === 7) runCommandSafe(player, "s:tparechazar");
   }, undefined);
 }
 
@@ -677,7 +679,7 @@ function openMoneyMenu(player) {
     .body("§7Controla tus finanzas y revisa tus incentivos.")
     .button("💵 §aVer mi saldo (/s:dinero)")
     .button("💸 §aEnviar Dinero a Jugador")
-    .button("🏦 §aBanco General (/s:banco)")
+    .button("🏦 §aBanco General (/s:vetarco)")
     .button("⚡ §aPotenciadores y Mejoras (/s:potenciadores)")
     .button("🏪 §aTienda del Servidor (/s:tienda)")
     .button("🎁 §aReclamar Recompensas (/s:recompensas)")
@@ -736,8 +738,8 @@ function openTradeMenu(player) {
     .button("⚖️ §3Casa de Subastas (/s:subastas)")
     .button("💰 §3Vender objeto de la mano")
     .button("🤝 §3Iniciar Intercambio Directo")
-    .button("✅ §2Aceptar Intercambio (/s:tradeaccept)")
-    .button("❌ §cRechazar Intercambio (/s:tradedeny)")
+    .button("✅ §2Aceptar Intercambio (/s:aceptartrato)")
+    .button("❌ §cRechazar Intercambio (/s:rechazartrato)")
     .button("❌ §8Cerrar Menú");
 
   safeOpenForm(player, form, (response) => {
@@ -745,8 +747,8 @@ function openTradeMenu(player) {
     if (idx === 0) runCommandSafe(player, "s:subastas");
     else if (idx === 1) openVenderForm(player);
     else if (idx === 2) openTradeForm(player);
-    else if (idx === 3) runCommandSafe(player, "s:tradeaccept");
-    else if (idx === 4) runCommandSafe(player, "s:tradedeny");
+    else if (idx === 3) runCommandSafe(player, "s:aceptartrato");
+    else if (idx === 4) runCommandSafe(player, "s:rechazartrato");
   }, undefined);
 }
 
@@ -852,8 +854,8 @@ function openClansMenu(player) {
     .button("🛡️ §6Comandos del Clan (/s:clan help)")
     .button("💬 §6Chat Privado del Clan (/s:c)")
     .button("⚔️ §6Solicitar Duelo en Coliseo")
-    .button("✅ §2Aceptar Duelo (/s:coliseoaccept)")
-    .button("❌ §cRechazar Duelo (/s:coliseodeny)")
+    .button("✅ §2Aceptar Duelo (/s:dueloaceptar)")
+    .button("❌ §cRechazar Duelo (/s:duelorechazar)")
     .button("❌ §8Cerrar Menú");
 
   safeOpenForm(player, form, (response) => {
@@ -861,8 +863,8 @@ function openClansMenu(player) {
     if (idx === 0) runCommandSafe(player, "s:clan help");
     else if (idx === 1) openClanChatForm(player);
     else if (idx === 2) openDuelForm(player);
-    else if (idx === 3) runCommandSafe(player, "s:coliseoaccept");
-    else if (idx === 4) runCommandSafe(player, "s:coliseodeny");
+    else if (idx === 3) runCommandSafe(player, "s:dueloaceptar");
+    else if (idx === 4) runCommandSafe(player, "s:duelorechazar");
   }, undefined);
 }
 
@@ -929,8 +931,8 @@ function openAdminMenu(player) {
     .body("§7Herramientas rápidas para administradores.")
     .button("🧹 §dLimpiar Suelo (/s:limpiar)")
     .button("👾 §dRemover NPCs en radio 15 (/s:removernpcs)")
-    .button("🔥 §dForzar evento de Horda (/s:hordastart)")
-    .button("🌾 §dForzar evento de Fiebre (/s:fiebrestart)")
+    .button("🔥 §dForzar evento de Horda (/s:iniciarhorda)")
+    .button("🌾 §dForzar evento de Fiebre (/s:iniciarfiebre)")
     .button("⚔️ §dAdministrar Expedición (/s:adminexpedicion)")
     .button("🚪 §dModeración: Sancionar Jugador (Ban)")
     .button("🔎 §dAuditar Bloque (BlockAudit)")
@@ -941,8 +943,8 @@ function openAdminMenu(player) {
     const idx = response.selection;
     if (idx === 0) runCommandSafe(player, "s:limpiar");
     else if (idx === 1) runCommandSafe(player, "s:removernpcs 15");
-    else if (idx === 2) runCommandSafe(player, "s:hordastart");
-    else if (idx === 3) runCommandSafe(player, "s:fiebrestart");
+    else if (idx === 2) runCommandSafe(player, "s:iniciarhorda");
+    else if (idx === 3) runCommandSafe(player, "s:iniciarfiebre");
     else if (idx === 4) runCommandSafe(player, "s:adminexpedicion");
     else if (idx === 5) openAdminBanForm(player);
     else if (idx === 6) openBlockAuditForm(player);

@@ -695,20 +695,22 @@ function registerCustomCommands() {
     const register = typeof registry?.registerCommand === "function" ? registry.registerCommand.bind(registry) : typeof registry?.register === "function" ? registry.register.bind(registry) : undefined;
     if (!register) return;
     try {
-      register({
-        name: `${COMMAND_NAMESPACE}:fiebrestart`,
-        description: "Inicia fiebre de mineria",
-        permissionLevel: ADMIN_PERMISSION
-      }, (origin) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo jugadores");
-        system.run(() => {
-          if (activeFiebre.active) return sender.sendMessage("§b§l[§3Fiebre§b§l]§r §cYa hay un evento en curso.");
-          startFiebreEvent();
-          scheduleAutoCheck(CHECK_INTERVAL_SECS);
+      for (const name of ["iniciarfiebre", "fiebrestart"]) {
+        register({
+          name: `${COMMAND_NAMESPACE}:${name}`,
+          description: "Inicia el evento de fiebre de minería",
+          permissionLevel: ADMIN_PERMISSION
+        }, (origin) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo jugadores");
+          system.run(() => {
+            if (activeFiebre.active) return sender.sendMessage("§b§l[§3Fiebre§b§l]§r §cYa hay un evento en curso.");
+            startFiebreEvent();
+            scheduleAutoCheck(CHECK_INTERVAL_SECS);
+          });
+          return commandOk("Fiebre iniciada.");
         });
-        return commandOk("Fiebre iniciada.");
-      });
+      }
     } catch (e) { ErrorReporter.report(e, { addonId: "mining_fever_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });}
   });
 }

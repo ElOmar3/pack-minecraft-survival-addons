@@ -2566,33 +2566,46 @@ function registerCustomCommands() {
         return commandOk("Procesando admincoliseolimpiar.");
       });
 
-      register({
-        name: `${COMMAND_NAMESPACE}:coliseopvp`,
-        description: "Solicita un duelo en el coliseo",
-        permissionLevel: CommandPermissionLevel.Any,
-        mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
-        optionalParameters: [{ name: "coliseo", type: CustomCommandParamType.String }],
-      }, (origin, jugador, coliseo) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        system.run(() => handleColiseumRequest(sender, String(jugador), coliseo === undefined ? "" : String(coliseo)));
-        return commandOk("Procesando coliseopvp.");
-      });
-
-      for (const name of ["coliseoaccept", "coliseodeny"]) {
+      for (const name of ["coliseopvp", "duelo"]) {
         register({
           name: `${COMMAND_NAMESPACE}:${name}`,
-          description: name === "coliseoaccept" ? "Acepta un duelo de coliseo" : "Rechaza un duelo de coliseo",
+          description: "Solicita un duelo formal en el coliseo",
+          permissionLevel: CommandPermissionLevel.Any,
+          mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
+          optionalParameters: [{ name: "coliseo", type: CustomCommandParamType.String }],
+        }, (origin, jugador, coliseo) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo para jugadores.");
+          system.run(() => handleColiseumRequest(sender, String(jugador), coliseo === undefined ? "" : String(coliseo)));
+          return commandOk(`Procesando ${name}.`);
+        });
+      }
+
+      for (const name of ["coliseoaccept", "dueloaceptar", "aceptarduelo", "coliseoaceptar"]) {
+        register({
+          name: `${COMMAND_NAMESPACE}:${name}`,
+          description: "Acepta un duelo de coliseo",
           permissionLevel: CommandPermissionLevel.Any,
         }, (origin) => {
           const sender = origin?.sourceEntity;
           if (!sender) return commandError("Solo para jugadores.");
-          system.run(() => {
-            if (name === "coliseoaccept") handleColiseumAccept(sender);
-            else handleColiseumDeny(sender);
-          });
+          system.run(() => handleColiseumAccept(sender));
           return commandOk(`Procesando ${name}.`);
         });
+      }
+
+      for (const name of ["coliseodeny", "duelorechazar", "rechazarduelo", "coliseorechazar"]) {
+        register({
+          name: `${COMMAND_NAMESPACE}:${name}`,
+          description: "Rechaza un duelo de coliseo",
+          permissionLevel: CommandPermissionLevel.Any,
+        }, (origin) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo para jugadores.");
+          system.run(() => handleColiseumDeny(sender));
+          return commandOk(`Procesando ${name}.`);
+        });
+      }
       }
 
       register({
@@ -2997,8 +3010,12 @@ function handleUnclaim(player) {
 
 // Dar/quitar permisos a amigos (Trust / Untrust)
 function handleTrustCommand(player, sub, targetName) {
-  if (!sub || (sub !== "trust" && sub !== "untrust") || !targetName) {
-    player.sendMessage("§b§l[§3Protección§b§l]§r §cUso: /s:zona trust <jugador> o /s:zona untrust <jugador>");
+  let action = String(sub || "").toLowerCase();
+  if (action === "confiar" || action === "invitar" || action === "amigo" || action === "agregar") action = "trust";
+  if (action === "desconfiar" || action === "revocar" || action === "quitar" || action === "expulsar") action = "untrust";
+
+  if (!action || (action !== "trust" && action !== "untrust") || !targetName) {
+    player.sendMessage("§b§l[§3Protección§b§l]§r §cUso: /s:zona confiar <jugador> o /s:zona desconfiar <jugador>");
     return;
   }
 
@@ -3209,7 +3226,7 @@ function handleColiseumRequest(player, targetName, coliseumName = "") {
     senderOrigin: serializeLocation(player.location, player.dimension.id),
   });
 
-  target.sendMessage(`§b§l[§4Coliseo§b§l]§r §c${player.name} §7te desafió a un PvP en el coliseo §e${zone.name}§7.\n§7Entrada: §e$${COLISEUM_ENTRY_FEE} por jugador§7. Premio financiado: §a$${COLISEUM_PVP_REWARD}§7.\n§7Usa §a/s:coliseoaccept §7o §c/s:coliseodeny§7. Expira en 60 segundos.`);
+  target.sendMessage(`§b§l[§4Coliseo§b§l]§r §c${player.name} §7te desafió a un PvP en el coliseo §e${zone.name}§7.\n§7Entrada: §e$${COLISEUM_ENTRY_FEE} por jugador§7. Premio financiado: §a$${COLISEUM_PVP_REWARD}§7.\n§7Usa §a/s:dueloaceptar §7(o /s:coliseoaccept) §7o §c/s:duelorechazar§7. Expira en 60 segundos.`);
   player.sendMessage(`§b§l[§4Coliseo§b§l]§r §7Solicitud enviada a §c${target.name}§7. La entrada de §e$${COLISEUM_ENTRY_FEE} §7se cobra al aceptar.`);
 }
 

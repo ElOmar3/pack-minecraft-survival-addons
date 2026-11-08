@@ -1,0 +1,38 @@
+[
+  {
+    "command": "/s:",
+    "count": 1,
+    "types": "chatStartsWith",
+    "files": "ranks_addon/main.js"
+  },
+  {
+    "command": "/s:boosters",
+    "count": 1,
+    "types": "chatStartsWith",
+    "files": "server_boosters_addon/main.js"
+  },
+  {
+    "command": "/s:mejoras",
+    "count": 1,
+    "types": "chatStartsWith",
+    "files": "server_boosters_addon/main.js"
+  },
+  {
+    "command": "/s:potenciadores",
+    "count": 1,
+    "types": "chatStartsWith",
+    "files": "server_boosters_addon/main.js"
+  },
+  {
+    "command": "/s:shop",
+    "count": 1,
+    "types": "chatStartsWith",
+    "files": "shop_addon/main.js"
+  },
+  {
+    "command": "/s:tienda",
+    "count": 1,
+    "types": "chatStartsWith",
+    "files": "shop_addon/main.js"
+  }
+]

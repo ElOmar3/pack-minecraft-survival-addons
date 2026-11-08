@@ -1890,39 +1890,44 @@ function registerCustomCommands() {
     const register = typeof registry?.registerCommand === "function" ? registry.registerCommand.bind(registry) : typeof registry?.register === "function" ? registry.register.bind(registry) : undefined;
     if (!register) return;
     try {
-      register({
-        name: `${COMMAND_NAMESPACE}:hordastart`,
-        description: "Inicia el evento de horda",
-        permissionLevel: ADMIN_PERMISSION
-      }, (origin) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo jugadores");
-        system.run(() => {
-          if (activeHorde.active) return sender.sendMessage(`${PREFIX} §cYa hay un evento en curso.`);
-          if (!startHordeEvent()) {
-            sender.sendMessage(`${PREFIX} §cEl lugar de la horda no está cargado. Acércate o usa un ticking area antes de iniciar la horda.`);
-          }
+      for (const name of ["iniciarhorda", "hordastart"]) {
+        register({
+          name: `${COMMAND_NAMESPACE}:${name}`,
+          description: "Inicia el evento de horda de monstruos",
+          permissionLevel: ADMIN_PERMISSION
+        }, (origin) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo jugadores");
+          system.run(() => {
+            if (activeHorde.active) return sender.sendMessage(`${PREFIX} §cYa hay un evento en curso.`);
+            if (!startHordeEvent()) {
+              sender.sendMessage(`${PREFIX} §cEl lugar de la horda no está cargado. Acércate o usa un ticking area antes de iniciar la horda.`);
+            }
+          });
+          return commandOk("Solicitud de horda recibida.");
         });
-        return commandOk("Solicitud de horda recibida.");
-      });
-      register({
-        name: `${COMMAND_NAMESPACE}:apocalipsis`,
-        description: "Inicia el apocalipsis zombie de cinco oleadas",
-        permissionLevel: ADMIN_PERMISSION
-      }, (origin) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo jugadores");
-        system.run(() => {
-          if (activeHorde.active || activeApocalypse.active) {
-            sender.sendMessage(`${PREFIX} §cYa hay un evento en curso.`);
-            return;
-          }
-          if (!startZombieApocalypse()) {
-            sender.sendMessage(`${PREFIX} §cEl lugar de la horda no está cargado. Acércate o usa un ticking area antes de iniciar el apocalipsis.`);
-          }
+      }
+
+      for (const name of ["iniciarapocalipsis", "apocalipsis"]) {
+        register({
+          name: `${COMMAND_NAMESPACE}:${name}`,
+          description: "Inicia el apocalipsis zombie de cinco oleadas",
+          permissionLevel: ADMIN_PERMISSION
+        }, (origin) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo jugadores");
+          system.run(() => {
+            if (activeHorde.active || activeApocalypse.active) {
+              sender.sendMessage(`${PREFIX} §cYa hay un evento en curso.`);
+              return;
+            }
+            if (!startZombieApocalypse()) {
+              sender.sendMessage(`${PREFIX} §cEl lugar de la horda no está cargado. Acércate o usa un ticking area antes de iniciar el apocalipsis.`);
+            }
+          });
+          return commandOk("Solicitud de apocalipsis recibida.");
         });
-        return commandOk("Solicitud de apocalipsis recibida.");
-      });
+      }
       register({
         name: `${COMMAND_NAMESPACE}:adminhorda`,
         description: "Configura el lugar y la recompensa de la horda",

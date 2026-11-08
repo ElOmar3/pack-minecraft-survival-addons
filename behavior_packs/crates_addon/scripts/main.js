@@ -336,53 +336,38 @@ function registerCustomCommands() {
     if (!register) return;
 
     try {
-      register({ name: `${COMMAND_NAMESPACE}:setcrate`, description: "Registra un crate", permissionLevel: ADMIN_PERMISSION }, (origin) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        runAdminCrateCommand(sender, "setcrate", ["setcrate"]);
-        return commandOk("Procesando setcrate.");
-      });
-      register({ name: `${COMMAND_NAMESPACE}:establecercofre`, description: "Registra un crate", permissionLevel: ADMIN_PERMISSION }, (origin) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        runAdminCrateCommand(sender, "setcrate", ["setcrate"]);
-        return commandOk("Procesando setcrate.");
-      });
-      register({ name: `${COMMAND_NAMESPACE}:delcrate`, description: "Elimina un crate", permissionLevel: ADMIN_PERMISSION }, (origin) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        runAdminCrateCommand(sender, "delcrate", ["delcrate"]);
-        return commandOk("Procesando delcrate.");
-      });
-      register({ name: `${COMMAND_NAMESPACE}:eliminarcofre`, description: "Elimina un crate", permissionLevel: ADMIN_PERMISSION }, (origin) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        runAdminCrateCommand(sender, "delcrate", ["delcrate"]);
-        return commandOk("Procesando delcrate.");
-      });
-      register({
-        name: `${COMMAND_NAMESPACE}:givekey`,
-        description: "Entrega llaves de crate",
-        permissionLevel: ADMIN_PERMISSION,
-        mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
-        optionalParameters: [{ name: "cantidad", type: CustomCommandParamType.Integer }],
-      }, (origin, jugador, cantidad) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        runAdminCrateCommand(sender, "givekey", ["givekey", String(jugador), String(cantidad ?? 1)]);
-        return commandOk("Procesando givekey.");
-      });
-      register({
-        name: `${COMMAND_NAMESPACE}:darllave`,
-        description: "Entrega llaves de crate",
-        permissionLevel: ADMIN_PERMISSION,
-        mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
-        optionalParameters: [{ name: "cantidad", type: CustomCommandParamType.Integer }],
-      }, (origin, jugador, cantidad) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        runAdminCrateCommand(sender, "givekey", ["givekey", String(jugador), String(cantidad ?? 1)]);
-        return commandOk("Procesando givekey.");
+      for (const name of ["fijarcaja", "establecercofre", "setcrate"]) {
+        register({ name: `${COMMAND_NAMESPACE}:${name}`, description: "Registra una caja o cofre de recompensas", permissionLevel: ADMIN_PERMISSION }, (origin) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo para jugadores.");
+          runAdminCrateCommand(sender, "setcrate", ["setcrate"]);
+          return commandOk(`Procesando ${name}.`);
+        });
+      }
+
+      for (const name of ["borrarcaja", "eliminarcaja", "eliminarcofre", "delcrate"]) {
+        register({ name: `${COMMAND_NAMESPACE}:${name}`, description: "Elimina una caja o cofre de recompensas", permissionLevel: ADMIN_PERMISSION }, (origin) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo para jugadores.");
+          runAdminCrateCommand(sender, "delcrate", ["delcrate"]);
+          return commandOk(`Procesando ${name}.`);
+        });
+      }
+
+      for (const name of ["darllave", "givekey"]) {
+        register({
+          name: `${COMMAND_NAMESPACE}:${name}`,
+          description: "Entrega llaves de caja/cofre a un jugador",
+          permissionLevel: ADMIN_PERMISSION,
+          mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
+          optionalParameters: [{ name: "cantidad", type: CustomCommandParamType.Integer }],
+        }, (origin, jugador, cantidad) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo para jugadores.");
+          runAdminCrateCommand(sender, "givekey", ["givekey", String(jugador), String(cantidad ?? 1)]);
+          return commandOk(`Procesando ${name}.`);
+        });
+      }
       });
     } catch (e) { ErrorReporter.report(e, { addonId: "crates_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
       console.warn("[Crates Addon] Error registrando custom commands: " + e);

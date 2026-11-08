@@ -282,72 +282,44 @@ function registerCustomCommands() {
     if (!register) return;
 
     try {
-      register({ name: `${COMMAND_NAMESPACE}:warps`, description: "Abre el menu de warps", permissionLevel: CommandPermissionLevel.Any }, (origin) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        system.run(() => openWarpsMenu(sender));
-        return commandOk("Abriendo warps.");
-      });
-      register({ name: `${COMMAND_NAMESPACE}:teletransportes`, description: "Abre el menu de warps", permissionLevel: CommandPermissionLevel.Any }, (origin) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        system.run(() => openWarpsMenu(sender));
-        return commandOk("Abriendo warps.");
-      });
-      register({ name: `${COMMAND_NAMESPACE}:warp`, description: "Abre el menu de warps", permissionLevel: CommandPermissionLevel.Any }, (origin) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        system.run(() => openWarpsMenu(sender));
-        return commandOk("Abriendo warps.");
-      });
-      register({ name: `${COMMAND_NAMESPACE}:teletransportar`, description: "Abre el menu de warps", permissionLevel: CommandPermissionLevel.Any }, (origin) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        system.run(() => openWarpsMenu(sender));
-        return commandOk("Abriendo warps.");
-      });
-      register({
-        name: `${COMMAND_NAMESPACE}:setwarp`,
-        description: "Define un warp",
-        permissionLevel: ADMIN_PERMISSION,
-        mandatoryParameters: [{ name: "nombre", type: CustomCommandParamType.String }],
-      }, (origin, nombre) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
-        system.run(() => handleSetWarp(sender, String(nombre || "")));
-        return commandOk("Procesando setwarp.");
-      });
-      register({
-        name: `${COMMAND_NAMESPACE}:establecerpunto`,
-        description: "Define un warp",
-        permissionLevel: ADMIN_PERMISSION,
-        mandatoryParameters: [{ name: "nombre", type: CustomCommandParamType.String }],
-      }, (origin, nombre) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
-        system.run(() => handleSetWarp(sender, String(nombre || "")));
-        return commandOk("Procesando setwarp.");
-      });
-      register({
-        name: `${COMMAND_NAMESPACE}:delwarp`,
-        description: "Elimina un warp",
-        permissionLevel: ADMIN_PERMISSION,
-        mandatoryParameters: [{ name: "nombre", type: CustomCommandParamType.String }],
-      }, (origin, nombre) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
-        system.run(() => handleDelWarp(sender, String(nombre || "")));
-        return commandOk("Procesando delwarp.");
-      });
-      register({
-        name: `${COMMAND_NAMESPACE}:eliminarpunto`,
-        description: "Elimina un warp",
-        permissionLevel: ADMIN_PERMISSION,
-        mandatoryParameters: [{ name: "nombre", type: CustomCommandParamType.String }],
-      }, (origin, nombre) => {
+      for (const name of ["destinos", "puntos", "teletransportes", "warps", "destino", "punto", "teletransporte", "warp"]) {
+        register({ name: `${COMMAND_NAMESPACE}:${name}`, description: "Abre el menú de destinos y puntos públicos", permissionLevel: CommandPermissionLevel.Any }, (origin) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo para jugadores.");
+          system.run(() => openWarpsMenu(sender));
+          return commandOk("Abriendo destinos.");
+        });
+      }
+
+      for (const name of ["fijardestino", "creardestino", "establecerpunto", "setwarp"]) {
+        register({
+          name: `${COMMAND_NAMESPACE}:${name}`,
+          description: "Define un nuevo destino o punto público",
+          permissionLevel: ADMIN_PERMISSION,
+          mandatoryParameters: [{ name: "nombre", type: CustomCommandParamType.String }],
+        }, (origin, nombre) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo para jugadores.");
+          if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
+          system.run(() => handleSetWarp(sender, String(nombre || "")));
+          return commandOk(`Procesando ${name}.`);
+        });
+      }
+
+      for (const name of ["borrardestino", "eliminardestino", "eliminarpunto", "delwarp"]) {
+        register({
+          name: `${COMMAND_NAMESPACE}:${name}`,
+          description: "Elimina un destino o punto público",
+          permissionLevel: ADMIN_PERMISSION,
+          mandatoryParameters: [{ name: "nombre", type: CustomCommandParamType.String }],
+        }, (origin, nombre) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo para jugadores.");
+          if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
+          system.run(() => handleDelWarp(sender, String(nombre || "")));
+          return commandOk(`Procesando ${name}.`);
+        });
+      }
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
         if (!isPlayerOp(sender)) return commandError("Solo para operadores.");

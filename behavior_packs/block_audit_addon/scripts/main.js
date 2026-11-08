@@ -368,48 +368,52 @@ function isAuditWand(item) {
 system.beforeEvents.startup.subscribe(({ customCommandRegistry: registry }) => {
   try {
     // Comando 1: Auditar Coordenadas
-    registry.registerCommand({
-      name: `${NS}:blockaudit`,
-      description: "Audita un bloque en coordenadas X Y Z",
-      permissionLevel: CommandPermissionLevel.Any,
-      mandatoryParameters: [
-        { name: "x", type: CustomCommandParamType.Integer },
-        { name: "y", type: CustomCommandParamType.Integer },
-        { name: "z", type: CustomCommandParamType.Integer }
-      ]
-    }, (origin, x, y, z) => {
-      const player = origin?.sourceEntity;
-      if (!player || !isOp(player)) return { status: CustomCommandStatus.Failure, message: "Solo operadores." };
-      
-      system.run(() => {
-        const found = historyAt(player.dimension.id, x, y, z).slice(-8).reverse();
-        reply(player, found.length ? 
-          `§a§lHistorial en ${x}, ${y}, ${z}:\n` + found.map(e => `§e[${new Date(e.t).toLocaleTimeString("es-MX")}] §b${e.p} §f${actionText(e)}`).join("\n") 
-          : "§cSin registros para estas coordenadas.");
+    for (const name of ["auditarbloques", "auditarbloque", "blockaudit"]) {
+      registry.registerCommand({
+        name: `${NS}:${name}`,
+        description: "Audita un bloque en coordenadas X Y Z",
+        permissionLevel: CommandPermissionLevel.Any,
+        mandatoryParameters: [
+          { name: "x", type: CustomCommandParamType.Integer },
+          { name: "y", type: CustomCommandParamType.Integer },
+          { name: "z", type: CustomCommandParamType.Integer }
+        ]
+      }, (origin, x, y, z) => {
+        const player = origin?.sourceEntity;
+        if (!player || !isOp(player)) return { status: CustomCommandStatus.Failure, message: "Solo operadores." };
+        
+        system.run(() => {
+          const found = historyAt(player.dimension.id, x, y, z).slice(-8).reverse();
+          reply(player, found.length ? 
+            `§a§lHistorial en ${x}, ${y}, ${z}:\n` + found.map(e => `§e[${new Date(e.t).toLocaleTimeString("es-MX")}] §b${e.p} §f${actionText(e)}`).join("\n") 
+            : "§cSin registros para estas coordenadas.");
+        });
+        return { status: CustomCommandStatus.Success, message: "Consulta enviada." };
       });
-      return { status: CustomCommandStatus.Success, message: "Consulta enviada." };
-    });
+    }
 
     // Comando 2: Historial de Jugador
-    registry.registerCommand({
-      name: `${NS}:blockhistory`,
-      description: "Historial de bloques por jugador",
-      permissionLevel: CommandPermissionLevel.Any,
-      mandatoryParameters: [
-        { name: "jugador", type: CustomCommandParamType.String }
-      ]
-    }, (origin, name) => {
-      const player = origin?.sourceEntity;
-      if (!player || !isOp(player)) return { status: CustomCommandStatus.Failure, message: "Solo operadores." };
-      
-      system.run(() => {
-        const found = read().filter(e => e.p.toLowerCase() === clean(name, 32).toLowerCase()).slice(-12).reverse();
-        reply(player, found.length ? 
-          `§a§lÚltimos cambios de ${name}:\n` + found.map(e => `§e[${new Date(e.t).toLocaleTimeString("es-MX")}] §f${actionText(e)} §7en ${e.x},${e.y},${e.z}`).join("\n") 
-          : "§cSin registros para ese jugador.");
+    for (const name of ["historialbloque", "historialbloques", "blockhistory"]) {
+      registry.registerCommand({
+        name: `${NS}:${name}`,
+        description: "Historial de bloques por jugador",
+        permissionLevel: CommandPermissionLevel.Any,
+        mandatoryParameters: [
+          { name: "jugador", type: CustomCommandParamType.String }
+        ]
+      }, (origin, nameParam) => {
+        const player = origin?.sourceEntity;
+        if (!player || !isOp(player)) return { status: CustomCommandStatus.Failure, message: "Solo operadores." };
+        
+        system.run(() => {
+          const found = read().filter(e => e.p.toLowerCase() === clean(nameParam, 32).toLowerCase()).slice(-12).reverse();
+          reply(player, found.length ? 
+            `§a§lÚltimos cambios de ${nameParam}:\n` + found.map(e => `§e[${new Date(e.t).toLocaleTimeString("es-MX")}] §f${actionText(e)} §7en ${e.x},${e.y},${e.z}`).join("\n") 
+            : "§cSin registros para ese jugador.");
+        });
+        return { status: CustomCommandStatus.Success, message: "Consulta enviada." };
       });
-      return { status: CustomCommandStatus.Success, message: "Consulta enviada." };
-    });
+    }
 
     // Comando 3: Dar la Vara de Auditoría
     registry.registerCommand({

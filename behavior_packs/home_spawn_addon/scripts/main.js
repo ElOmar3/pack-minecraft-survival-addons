@@ -448,27 +448,37 @@ function registerCustomCommands() {
     if (!register) return;
 
     try {
-      for (const name of ["home", "casa", "sethome", "establecercasa", "spawn", "aparicion", "setspawn", "estableceraparicion", "tpaccept", "tpaaceptar", "tpdeny", "tparechazar", "guias", "reglas", "tumba", "tumbatp"]) {
+      for (const name of [
+        "home", "casa",
+        "sethome", "guardarcasa", "fijarcasa", "establecercasa",
+        "delhome", "borrarcasa", "eliminarcasa",
+        "spawn", "aparicion", "origen", "reaparicion",
+        "setspawn", "fijaraparicion", "estableceraparicion", "fijarorigen",
+        "tpaccept", "tpaaceptar", "aceptartp",
+        "tpdeny", "tparechazar", "rechazartp",
+        "guias", "reglas", "tumba", "tumbatp"
+      ]) {
         register({
           name: `${COMMAND_NAMESPACE}:${name}`,
           description: `Comando ${name}`,
-          permissionLevel: (name === "setspawn" || name === "estableceraparicion") ? ADMIN_PERMISSION : CommandPermissionLevel.Any,
-          ...(name === "home" || name === "casa" || name === "sethome" || name === "establecercasa"
+          permissionLevel: (name === "setspawn" || name === "estableceraparicion" || name === "fijaraparicion" || name === "fijarorigen") ? ADMIN_PERMISSION : CommandPermissionLevel.Any,
+          ...(name === "home" || name === "casa" || name === "sethome" || name === "guardarcasa" || name === "fijarcasa" || name === "establecercasa" || name === "delhome" || name === "borrarcasa" || name === "eliminarcasa"
             ? { optionalParameters: [{ name: "numero", type: CustomCommandParamType.Integer }] }
             : {}),
         }, (origin, numero) => {
           const sender = origin?.sourceEntity;
           if (!sender) return commandError("Solo para jugadores.");
-          if ((name === "setspawn" || name === "estableceraparicion") && !isPlayerOp(sender)) {
+          if ((name === "setspawn" || name === "estableceraparicion" || name === "fijaraparicion" || name === "fijarorigen") && !isPlayerOp(sender)) {
             return commandError("Solo para operadores.");
           }
           let internalName = name;
-          if (name === "casa") internalName = "home";
-          if (name === "establecercasa") internalName = "sethome";
-          if (name === "aparicion") internalName = "spawn";
-          if (name === "estableceraparicion") internalName = "setspawn";
-          if (name === "tpaaceptar") internalName = "tpaccept";
-          if (name === "tparechazar") internalName = "tpdeny";
+          if (["casa"].includes(name)) internalName = "home";
+          if (["guardarcasa", "fijarcasa", "establecercasa"].includes(name)) internalName = "sethome";
+          if (["borrarcasa", "eliminarcasa"].includes(name)) internalName = "delhome";
+          if (["aparicion", "origen", "reaparicion"].includes(name)) internalName = "spawn";
+          if (["fijaraparicion", "fijarorigen", "estableceraparicion"].includes(name)) internalName = "setspawn";
+          if (["tpaaceptar", "aceptartp"].includes(name)) internalName = "tpaccept";
+          if (["tparechazar", "rechazartp"].includes(name)) internalName = "tpdeny";
           system.run(async () => {
             const args = [internalName];
             if (numero !== undefined && numero !== null) args.push(String(numero));
@@ -478,112 +488,124 @@ function registerCustomCommands() {
         });
       }
 
-      register({
-        name: `${COMMAND_NAMESPACE}:tpa`,
-        description: "Solicita teleport a un jugador",
-        permissionLevel: CommandPermissionLevel.Any,
-        mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
-      }, (origin, jugador) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        system.run(async () => {
-          await handleCommand(sender, "tpa", ["tpa", String(jugador)]);
+      for (const name of ["tpa", "pedirtp"]) {
+        register({
+          name: `${COMMAND_NAMESPACE}:${name}`,
+          description: "Solicita teletransporte a un jugador",
+          permissionLevel: CommandPermissionLevel.Any,
+          mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
+        }, (origin, jugador) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo para jugadores.");
+          system.run(async () => {
+            await handleCommand(sender, "tpa", ["tpa", String(jugador)]);
+          });
+          return commandOk(`Procesando ${name}.`);
         });
-        return commandOk("Procesando tpa.");
-      });
+      }
 
       if (LEGACY_MODERATION_MODE === "ENABLED") {
-      register({
-        name: `${COMMAND_NAMESPACE}:ban`,
-        description: "Banea a un jugador",
-        permissionLevel: ADMIN_PERMISSION,
-        mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
-        optionalParameters: [{ name: "motivo", type: CustomCommandParamType.String }],
-      }, (origin, jugador, motivo) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
-        const args = ["ban", String(jugador)];
-        if (motivo !== undefined && motivo !== null && String(motivo).trim()) args.push(String(motivo));
-        system.run(async () => {
-          await handleCommand(sender, "ban", args);
-        });
-        return commandOk("Procesando ban.");
-      });
+        for (const name of ["ban", "vetar", "bloquear"]) {
+          register({
+            name: `${COMMAND_NAMESPACE}:${name}`,
+            description: "Banea/veta a un jugador del servidor",
+            permissionLevel: ADMIN_PERMISSION,
+            mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
+            optionalParameters: [{ name: "motivo", type: CustomCommandParamType.String }],
+          }, (origin, jugador, motivo) => {
+            const sender = origin?.sourceEntity;
+            if (!sender) return commandError("Solo para jugadores.");
+            if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
+            const args = ["ban", String(jugador)];
+            if (motivo !== undefined && motivo !== null && String(motivo).trim()) args.push(String(motivo));
+            system.run(async () => {
+              await handleCommand(sender, "ban", args);
+            });
+            return commandOk(`Procesando ${name}.`);
+          });
+        }
 
-      register({
-        name: `${COMMAND_NAMESPACE}:tempban`,
-        description: "Banea temporalmente a un jugador",
-        permissionLevel: ADMIN_PERMISSION,
-        mandatoryParameters: [
-          { name: "jugador", type: CustomCommandParamType.String },
-          { name: "minutos", type: CustomCommandParamType.Integer },
-        ],
-        optionalParameters: [{ name: "motivo", type: CustomCommandParamType.String }],
-      }, (origin, jugador, minutos, motivo) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
-        const args = ["tempban", String(jugador), String(minutos)];
-        if (motivo !== undefined && motivo !== null && String(motivo).trim()) args.push(String(motivo));
-        system.run(async () => {
-          await handleCommand(sender, "tempban", args);
-        });
-        return commandOk("Procesando tempban.");
-      });
+        for (const name of ["tempban", "vetartemporal", "bloqueartemporal"]) {
+          register({
+            name: `${COMMAND_NAMESPACE}:${name}`,
+            description: "Veta temporalmente a un jugador",
+            permissionLevel: ADMIN_PERMISSION,
+            mandatoryParameters: [
+              { name: "jugador", type: CustomCommandParamType.String },
+              { name: "minutos", type: CustomCommandParamType.Integer },
+            ],
+            optionalParameters: [{ name: "motivo", type: CustomCommandParamType.String }],
+          }, (origin, jugador, minutos, motivo) => {
+            const sender = origin?.sourceEntity;
+            if (!sender) return commandError("Solo para jugadores.");
+            if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
+            const args = ["tempban", String(jugador), String(minutos)];
+            if (motivo !== undefined && motivo !== null && String(motivo).trim()) args.push(String(motivo));
+            system.run(async () => {
+              await handleCommand(sender, "tempban", args);
+            });
+            return commandOk(`Procesando ${name}.`);
+          });
+        }
 
-      register({
-        name: `${COMMAND_NAMESPACE}:unban`,
-        description: "Desbanea a un jugador",
-        permissionLevel: ADMIN_PERMISSION,
-        mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
-      }, (origin, jugador) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
-        system.run(async () => {
-          await handleCommand(sender, "unban", ["unban", String(jugador)]);
-        });
-        return commandOk("Procesando unban.");
-      });
+        for (const name of ["unban", "desvetar", "desbloquear"]) {
+          register({
+            name: `${COMMAND_NAMESPACE}:${name}`,
+            description: "Desveta a un jugador del servidor",
+            permissionLevel: ADMIN_PERMISSION,
+            mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
+          }, (origin, jugador) => {
+            const sender = origin?.sourceEntity;
+            if (!sender) return commandError("Solo para jugadores.");
+            if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
+            system.run(async () => {
+              await handleCommand(sender, "unban", ["unban", String(jugador)]);
+            });
+            return commandOk(`Procesando ${name}.`);
+          });
+        }
 
-      register({
-        name: `${COMMAND_NAMESPACE}:mute`,
-        description: "Silencia a un jugador",
-        permissionLevel: ADMIN_PERMISSION,
-        mandatoryParameters: [
-          { name: "jugador", type: CustomCommandParamType.String },
-          { name: "minutos", type: CustomCommandParamType.Integer },
-        ],
-        optionalParameters: [{ name: "motivo", type: CustomCommandParamType.String }],
-      }, (origin, jugador, minutos, motivo) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
-        const args = ["mute", String(jugador), String(minutos)];
-        if (motivo !== undefined && motivo !== null && String(motivo).trim()) args.push(String(motivo));
-        system.run(async () => {
-          await handleCommand(sender, "mute", args);
-        });
-        return commandOk("Procesando mute.");
-      });
+        for (const name of ["mute", "silenciar"]) {
+          register({
+            name: `${COMMAND_NAMESPACE}:${name}`,
+            description: "Silencia a un jugador en el chat",
+            permissionLevel: ADMIN_PERMISSION,
+            mandatoryParameters: [
+              { name: "jugador", type: CustomCommandParamType.String },
+              { name: "minutos", type: CustomCommandParamType.Integer },
+            ],
+            optionalParameters: [{ name: "motivo", type: CustomCommandParamType.String }],
+          }, (origin, jugador, minutos, motivo) => {
+            const sender = origin?.sourceEntity;
+            if (!sender) return commandError("Solo para jugadores.");
+            if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
+            const args = ["mute", String(jugador), String(minutos)];
+            if (motivo !== undefined && motivo !== null && String(motivo).trim()) args.push(String(motivo));
+            system.run(async () => {
+              await handleCommand(sender, "mute", args);
+            });
+            return commandOk(`Procesando ${name}.`);
+          });
+        }
 
-      register({
-        name: `${COMMAND_NAMESPACE}:unmute`,
-        description: "Quita silencio a un jugador",
-        permissionLevel: ADMIN_PERMISSION,
-        mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
-      }, (origin, jugador) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
-        system.run(async () => {
-          await handleCommand(sender, "unmute", ["unmute", String(jugador)]);
-        });
-        return commandOk("Procesando unmute.");
-      });
+        for (const name of ["unmute", "dessilenciar"]) {
+          register({
+            name: `${COMMAND_NAMESPACE}:${name}`,
+            description: "Quita el silencio a un jugador",
+            permissionLevel: ADMIN_PERMISSION,
+            mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
+          }, (origin, jugador) => {
+            const sender = origin?.sourceEntity;
+            if (!sender) return commandError("Solo para jugadores.");
+            if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
+            system.run(async () => {
+              await handleCommand(sender, "unmute", ["unmute", String(jugador)]);
+            });
+            return commandOk(`Procesando ${name}.`);
+          });
+        }
       } else if (LEGACY_MODERATION_MODE === "SHADOWED") {
-        for (const name of ["unban", "unmute"]) {
+        for (const name of ["unban", "unmute", "desvetar", "dessilenciar"]) {
           register({
             name: `${COMMAND_NAMESPACE}:${name}`,
             description: `Redirección FCX para ${name}`,
@@ -597,32 +619,42 @@ function registerCustomCommands() {
         }
       }
 
-      register({
-        name: `${COMMAND_NAMESPACE}:removernpcs`,
-        description: "Remueve NPCs cercanos",
-        permissionLevel: ADMIN_PERMISSION,
-        optionalParameters: [{ name: "radio", type: CustomCommandParamType.Integer }],
-      }, (origin, radio) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
-        const args = ["removernpcs"];
-        if (radio !== undefined && radio !== null) args.push(String(radio));
-        system.run(async () => {
-          await handleCommand(sender, "removernpcs", args);
+      for (const name of ["removernpcs", "borrarnpcs", "eliminarnpcs"]) {
+        register({
+          name: `${COMMAND_NAMESPACE}:${name}`,
+          description: "Remueve NPCs cercanos",
+          permissionLevel: ADMIN_PERMISSION,
+          optionalParameters: [{ name: "radio", type: CustomCommandParamType.Integer }],
+        }, (origin, radio) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo para jugadores.");
+          if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
+          const args = ["removernpcs"];
+          if (radio !== undefined && radio !== null) args.push(String(radio));
+          system.run(async () => {
+            await handleCommand(sender, "removernpcs", args);
+          });
+          return commandOk(`Procesando ${name}.`);
         });
-        return commandOk("Procesando removernpcs.");
-      });
+      }
 
-      register({
-        name: `${COMMAND_NAMESPACE}:adminlist`,
-        description: "Lista historica de jugadores y XUID",
-        permissionLevel: ADMIN_PERMISSION,
-        optionalParameters: [{ name: "filtro", type: CustomCommandParamType.String }],
-      }, (origin, filtro) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        const args = ["adminlist"];
+      for (const name of ["adminlist", "listastaff", "listaadmin"]) {
+        register({
+          name: `${COMMAND_NAMESPACE}:${name}`,
+          description: "Lista histórica de jugadores y XUID",
+          permissionLevel: ADMIN_PERMISSION,
+          optionalParameters: [{ name: "filtro", type: CustomCommandParamType.String }],
+        }, (origin, filtro) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo para jugadores.");
+          const args = ["adminlist"];
+          if (filtro !== undefined && filtro !== null && String(filtro).trim()) args.push(String(filtro));
+          system.run(async () => {
+            await handleCommand(sender, "adminlist", args);
+          });
+          return commandOk(`Procesando ${name}.`);
+        });
+      }
         if (filtro !== undefined && filtro !== null && String(filtro).trim()) args.push(String(filtro));
         system.run(async () => {
           await handleCommand(sender, "adminlist", args);
@@ -1163,10 +1195,11 @@ try {
       // El registro nativo de /s:home no puede cambiar sus parámetros durante
       // un reload de BDS. Esta ruta permite seleccionar las casas extra sin
       // reiniciar: /s:home 1 hasta /s:home 5.
-      const extraHomeMatch = message.match(/^\/?s:(home|casa|sethome|establecercasa)\s+([1-5])$/i);
+      const extraHomeMatch = message.match(/^\/?s:(home|casa|sethome|guardarcasa|fijarcasa|establecercasa)\s+([1-5])$/i);
       if (extraHomeMatch && sender) {
         if (event.cancel !== undefined) event.cancel = true;
-        const cmdKey = extraHomeMatch[1].toLowerCase().includes("set") ? "sethome" : "home";
+        const isSet = /set|guardar|fijar|establecer/i.test(extraHomeMatch[1]);
+        const cmdKey = isSet ? "sethome" : "home";
         const slot = extraHomeMatch[2];
         system.run(async () => {
           await handleCommand(sender, cmdKey, [cmdKey, slot]);
@@ -1409,7 +1442,7 @@ async function handleCommand(player, command, args) {
     });
     
     // Enviamos los mensajes correspondientes
-    target.sendMessage(`§b§l[§3TPA§b§l]§r §b${player.name} §7quiere teletransportarse a tu ubicación.\n§7Escribe §a/s:tpaccept §7para aceptar o §c/s:tpdeny §7para rechazar. Expira en 60 segundos.`);
+    target.sendMessage(`§b§l[§3TPA§b§l]§r §b${player.name} §7quiere teletransportarse a tu ubicación.\n§7Escribe §a/s:tpaaceptar §7para aceptar o §c/s:tparechazar §7para rechazar. Expira en 60 segundos.`);
     player.sendMessage(`§b§l[§3TPA§b§l]§r §7Solicitud enviada a §b${target.name}§7. Expira en 60 segundos.`);
     return;
   }
@@ -1981,20 +2014,20 @@ function openGuidesMenu(player) {
         openGuideDetail(player, "Casas y Spawn", 
           "§e¿Cómo guardar tu casa?\n" +
           "§7Párate en el lugar donde quieras guardar tu base. La casa principal usa:\n" +
-          "§a👉 /s:sethome 1\n" +
-          "§7Las casas extra usan §a/s:sethome 2§7 hasta §a/s:sethome 5§7.\n\n" +
+          "§a👉 /s:guardarcasa 1 §7(o /s:casa fijar)\n" +
+          "§7Las casas extra usan §a/s:guardarcasa 2§7 hasta §a/s:guardarcasa 5§7.\n\n" +
           "§e¿Cómo regresar a tu casa?\n" +
-          "§7Casa principal: §a/s:home§7. Casas extra: §a/s:home 2§7 hasta §a/s:home 5§7.\n\n" +
+          "§7Casa principal: §a/s:casa§7. Casas extra: §a/s:casa 2§7 hasta §a/s:casa 5§7.\n\n" +
           "§e¿Cómo ir con un amigo?\n" +
           "§71. Para pedir ir con tu amigo escribe:\n" +
           "§a👉 /s:tpa <Nombre>\n" +
           "§72. Tu amigo debe aceptar escribiendo:\n" +
-          "§a👉 /s:tpaccept\n" +
+          "§a👉 /s:tpaaceptar\n" +
           "§73. O puede rechazarlo escribiendo:\n" +
-          "§a👉 /s:tpdeny\n\n" +
+          "§a👉 /s:tparechazar\n\n" +
           "§e¿Cómo ir al inicio?\n" +
-          "§7Para volver al inicio seguro (Spawn) escribe:\n" +
-          "§a👉 /s:spawn\n\n" +
+          "§7Para volver al inicio seguro (Aparición) escribe:\n" +
+          "§a👉 /s:aparicion §7(o /s:spawn)\n\n" +
           "§e¿Cómo encontrar tu tumba?\n" +
           "§7Cuando se confirme tu tumba, puedes ir directamente con:\n" +
           "§a👉 /s:tumbatp\n" +
@@ -2125,8 +2158,8 @@ function openGuidesMenu(player) {
         break;
       case 9:
         openGuideDetail(player, "Viajes, TPA y Recuperación",
-          "§e🧭 Moverte por el servidor\n§7Usa §a/s:spawn§7 para volver al inicio, §a/s:warps§7 para puntos públicos y §a/s:rtp§7 para explorar una zona segura aleatoria.\n\n" +
-          "§e👤 Viajar con amigos\n§7Envía §a/s:tpa <jugador>§7. La otra persona acepta con §a/s:tpaccept§7 o rechaza con §a/s:tpdeny§7. No envíes solicitudes repetidas.\n\n" +
+          "§e🧭 Moverte por el servidor\n§7Usa §a/s:aparicion§7 para volver al inicio, §a/s:destinos§7 para puntos públicos y §a/s:rtp§7 para explorar una zona segura aleatoria.\n\n" +
+          "§e👤 Viajar con amigos\n§7Envía §a/s:tpa <jugador>§7. La otra persona acepta con §a/s:tpaaceptar§7 o rechaza con §a/s:tparechazar§7. No envíes solicitudes repetidas.\n\n" +
           "§e⚰️ Al morir\n§7Cuando se cree tu tumba, usa §a/s:tumbatp§7 para ir directamente a ella. El comando valida que sea tu tumba activa y que haya espacio seguro. Usa §a/s:tumba§7 para consultar coordenadas."
         );
         break;

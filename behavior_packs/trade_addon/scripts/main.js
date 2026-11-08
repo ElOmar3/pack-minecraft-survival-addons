@@ -441,7 +441,11 @@ function isPlayerTrading(playerName) {
   );
 }
 
-const targetCommands = ["trade", "tradeaccept", "tradedeny"];
+const targetCommands = [
+  "comerciar", "trato", "intercambiar", "trade",
+  "aceptartrato", "aceptarintercambio", "tradeaccept",
+  "rechazartrato", "rechazarintercambio", "tradedeny"
+];
 
 function registerCustomCommands() {
   const startupSignal = system?.beforeEvents?.startup;
@@ -457,50 +461,56 @@ function registerCustomCommands() {
     if (!register) return;
 
     try {
-      register({
-        name: `${COMMAND_NAMESPACE}:trade`,
-        description: "Invita a un jugador a intercambiar",
-        permissionLevel: CommandPermissionLevel.Any,
-        mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
-      }, (origin, jugador) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        system.run(async () => {
-          await handleCommand(sender, "trade", ["trade", String(jugador)]);
+      for (const name of ["comerciar", "trato", "intercambiar", "trade"]) {
+        register({
+          name: `${COMMAND_NAMESPACE}:${name}`,
+          description: "Invita a un jugador a intercambiar objetos o dinero",
+          permissionLevel: CommandPermissionLevel.Any,
+          mandatoryParameters: [{ name: "jugador", type: CustomCommandParamType.String }],
+        }, (origin, jugador) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo para jugadores.");
+          system.run(async () => {
+            await handleCommand(sender, "trade", ["trade", String(jugador)]);
+          });
+          return commandOk(`Procesando ${name}.`);
         });
-        return commandOk("Procesando trade.");
-      });
+      }
 
-      register({
-        name: `${COMMAND_NAMESPACE}:tradeaccept`,
-        description: "Acepta un intercambio",
-        permissionLevel: CommandPermissionLevel.Any,
-      }, (origin) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        system.run(async () => {
-          await handleCommand(sender, "tradeaccept", ["tradeaccept"]);
+      for (const name of ["aceptartrato", "aceptarintercambio", "tradeaccept"]) {
+        register({
+          name: `${COMMAND_NAMESPACE}:${name}`,
+          description: "Acepta una solicitud de intercambio pendiente",
+          permissionLevel: CommandPermissionLevel.Any,
+        }, (origin) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo para jugadores.");
+          system.run(async () => {
+            await handleCommand(sender, "tradeaccept", ["tradeaccept"]);
+          });
+          return commandOk(`Procesando ${name}.`);
         });
-        return commandOk("Procesando tradeaccept.");
-      });
+      }
 
-      register({
-        name: `${COMMAND_NAMESPACE}:tradedeny`,
-        description: "Rechaza un intercambio",
-        permissionLevel: CommandPermissionLevel.Any,
-      }, (origin) => {
-        const sender = origin?.sourceEntity;
-        if (!sender) return commandError("Solo para jugadores.");
-        system.run(async () => {
-          if (tradeRequests.has(sender.name.toLowerCase())) {
-            tradeRequests.delete(sender.name.toLowerCase());
-            sender.sendMessage("§b§l[§3Intercambio§b§l]§r §cHas rechazado la solicitud.");
-          } else {
-            sender.sendMessage("§b§l[§3Intercambio§b§l]§r §cNo tienes solicitudes pendientes.");
-          }
+      for (const name of ["rechazartrato", "rechazarintercambio", "tradedeny"]) {
+        register({
+          name: `${COMMAND_NAMESPACE}:${name}`,
+          description: "Rechaza una solicitud de intercambio",
+          permissionLevel: CommandPermissionLevel.Any,
+        }, (origin) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Solo para jugadores.");
+          system.run(async () => {
+            if (tradeRequests.has(sender.name.toLowerCase())) {
+              tradeRequests.delete(sender.name.toLowerCase());
+              sender.sendMessage("§b§l[§3Intercambio§b§l]§r §cHas rechazado la solicitud.");
+            } else {
+              sender.sendMessage("§b§l[§3Intercambio§b§l]§r §cNo tienes solicitudes pendientes.");
+            }
+          });
+          return commandOk(`Procesando ${name}.`);
         });
-        return commandOk("Procesando tradedeny.");
-      });
+      }
     } catch (e) { ErrorReporter.report(e, { addonId: "trade_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
       console.warn("[Trade UI Addon] Error registrando custom commands: " + e);
     }
@@ -537,10 +547,14 @@ try {
 }
 
 async function handleCommand(player, command, args) {
+  if (["comerciar", "trato", "intercambiar"].includes(command)) command = "trade";
+  if (["aceptartrato", "aceptarintercambio"].includes(command)) command = "tradeaccept";
+  if (["rechazartrato", "rechazarintercambio"].includes(command)) command = "tradedeny";
+
   if (command === "trade") {
     const targetName = args.slice(1).join(" ").trim();
     if (!targetName) {
-      player.sendMessage("§b§l[§3Intercambio§b§l]§r §cUso: /s:trade <nombre_del_jugador>");
+      player.sendMessage("§b§l[§3Intercambio§b§l]§r §cUso: /s:comerciar <nombre_del_jugador>");
       return;
     }
     
@@ -558,7 +572,7 @@ async function handleCommand(player, command, args) {
     }
     
     if (target.name === player.name) {
-      player.sendMessage("§b§l[§3Intercambio§b§l]§r §cNo puedes tradear contigo mismo.");
+      player.sendMessage("§b§l[§3Intercambio§b§l]§r §cNo puedes comerciar contigo mismo.");
       return;
     }
     if (isPlayerTrading(player.name) || isPlayerTrading(target.name)) {
@@ -571,7 +585,7 @@ async function handleCommand(player, command, args) {
       timestamp: Date.now()
     });
     
-    target.sendMessage(`§b§l[§3Intercambio§b§l]§r §b${player.name} §7te invita a un intercambio seguro.\n§7Escribe §a/s:tradeaccept §7para aceptar. Expira en 60 segundos.`);
+    target.sendMessage(`§b§l[§3Intercambio§b§l]§r §b${player.name} §7te invita a un intercambio seguro.\n§7Escribe §a/s:aceptartrato §7o usa el menú para aceptar. Expira en 60 segundos.`);
     player.sendMessage(`§b§l[§3Intercambio§b§l]§r §7Invitación enviada a §b${target.name}§7.`);
     return;
   }
