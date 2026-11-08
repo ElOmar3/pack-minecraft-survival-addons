@@ -133,6 +133,39 @@ system.runTimeout(() => {
   } catch (e) {}
 }, 120);
 // === FIN PERSISTENCIA SQLITE PUENTE V3 ===
+
+// ============================================================================
+// METAS COMUNITARIAS DEL SERVIDOR (FASE 2)
+// ============================================================================
+const COMMUNITY_QUEST_TARGET = 30;
+
+function advanceCommunityQuests() {
+  let current = Number(globalThis.__sqlite_get_prop_v2__("quests_addon", "world", "community_quest_count") || 0) + 1;
+  
+  if (current >= COMMUNITY_QUEST_TARGET) {
+    globalThis.__sqlite_set_prop_v2__("quests_addon", "world", "community_quest_count", 0);
+    const endTime = Date.now() + 30 * 60 * 1000;
+    globalThis.__sqlite_set_prop_v2__("server_boosters_addon", "world", "booster_jobs_active", 1);
+    globalThis.__sqlite_set_prop_v2__("server_boosters_addon", "world", "booster_jobs_endTime", endTime);
+    globalThis.__sqlite_set_prop_v2__("server_boosters_addon", "world", "booster_jobs_buyer", "Comunidad");
+    
+    world.sendMessage("§6§l========================================");
+    world.sendMessage("§6  ¡META COMUNITARIA DEL SERVIDOR ALCANZADA!");
+    world.sendMessage(`§e  ¡Los jugadores completaron ${COMMUNITY_QUEST_TARGET} misiones secundarias!`);
+    world.sendMessage("§a  ⚡ ¡POTENCIADOR GLOBAL DE EMPLEOS ACTIVADO (30 MIN)!");
+    world.sendMessage("§6§l========================================");
+    for (const p of world.getAllPlayers()) {
+      try { p.playSound("random.levelup", { pitch: 1.0 }); } catch (e) {}
+      try {
+        p.onScreenDisplay?.setTitle("§6§l¡META COMUNITARIA!");
+        p.onScreenDisplay?.setSubtitle("§aPotenciador Global de Empleos Activado (30m)");
+      } catch (e) {}
+    }
+  } else {
+    globalThis.__sqlite_set_prop_v2__("quests_addon", "world", "community_quest_count", current);
+  }
+}
+
 console.warn("Side Quests Addon iniciado.");
 const COMMAND_NAMESPACE = "s";
 const QUEST_REWARDS_PAID_KEY = "quests_rewards_paid_v1";
@@ -790,6 +823,7 @@ function advanceQuest(player, type, targetId, amount = 1) {
       return;
     }
     for (const quest of newlyCompleted) {
+      advanceCommunityQuests();
       system.run(() => {
         try {
           const paid = claimQuestReward(player, quest);
