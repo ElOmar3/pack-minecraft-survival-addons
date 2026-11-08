@@ -70,9 +70,27 @@ export class Logger {
     this.outbox.enqueue(packet, priority);
 
     
-    // Alerta in-game a OPs si pasa el umbral de alerta
-    if (score >= Config.violations.alertThreshold) {
-      this.sendAlertToOps(`§e${player.name} §7sospechoso de: §f${detector} §7(Conf: ${(score/100).toFixed(2)}) [${action.toUpperCase()}]`);
+    // Alerta in-game mejorada a staff con sonido y actionbar (Fase 1)
+    if (score >= 80 || score >= Config.violations.alertThreshold) {
+      this.sendEnhancedAlertToStaff(player, detector, score, action);
+    }
+  }
+
+  static sendEnhancedAlertToStaff(suspectPlayer, detector, score, action) {
+    const chatMsg = `§4§l[ANTI-CHEAT ALERTA] §c${suspectPlayer.name} §eha alcanzado §c${score}% §ede sospecha en §f${detector} §e[${action.toUpperCase()}]. Escribe §f/s:congelar ${suspectPlayer.name} §epara inspeccionar.`;
+    const actionBarMsg = `§4§l[ALERTA] §c${suspectPlayer.name} §e- ${detector} (${score}%)`;
+
+    for (const staff of world.getAllPlayers()) {
+      const isStaff = staff.isOp === true ||
+        (typeof staff.isOp === "function" && staff.isOp()) ||
+        staff.hasTag("op") || staff.hasTag("admin") ||
+        staff.hasTag("fcx.admin") || staff.hasTag("fcx.mod") || staff.hasTag("staff");
+
+      if (isStaff) {
+        staff.sendMessage(chatMsg);
+        try { staff.onScreenDisplay?.setActionBar(actionBarMsg); } catch (e) {}
+        try { staff.playSound("note.pling", { pitch: 1.8, volume: 1.0 }); } catch (e) {}
+      }
     }
   }
 

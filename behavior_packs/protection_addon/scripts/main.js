@@ -2060,7 +2060,9 @@ try {
         maybeWarnProtection(player, "§b§l[§4Coliseo§b§l]§r §cLos contenedores estan bloqueados mientras el coliseo se restaura por snapshot.");
         return;
       }
-      if (isProtectedBlockInteraction(block) && !checkPermission(player, loc, block.dimension.id, "interact")) {
+      const currentZones = getZonesAt(loc, block.dimension.id);
+      const allowDoor = isDoorOrGateBlock(block) && currentZones.some(z => z.flags?.visitor_doors === true);
+      if (isProtectedBlockInteraction(block) && !allowDoor && !checkPermission(player, loc, block.dimension.id, "interact")) {
         event.cancel = true;
         maybeWarnProtection(player, "§b§l[§3Protección§b§l]§r §cNo puedes interactuar con esto aquí.");
       }
@@ -2429,7 +2431,7 @@ try {
           return isInsideAutomationArea(loc, dimension.id, automation.zone, automation.area) &&
             isAutomationHarvestBlock(block) && !isCommunityLeafBlock(block);
         }
-        const isProt = zones.some(z => isInside(loc, dimension.id, z));
+        const isProt = zones.some(z => isInside(loc, dimension.id, z) && (z.isAdmin || z.flags?.explosions !== true));
         return !isProt;
       } catch (err) { ErrorReporter.report(err, { addonId: "protection_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
         return false;
@@ -3008,13 +3010,41 @@ function handleUnclaim(player) {
 }
 
 // Dar/quitar permisos a amigos (Trust / Untrust)
-function handleTrustCommand(player, sub, targetName) {
-  let action = String(sub || "").toLowerCase();
-  if (action === "confiar" || action === "invitar" || action === "amigo" || action === "agregar") action = "trust";
-  if (action === "desconfiar" || action === "revocar" || action === "quitar" || action === "expulsar") action = "untrust";
+function handleZoneCommand(player, sub, param) {
+  const action = String(sub || "").toLowerCase();
+  
+  if (action === "bordes" || action === "borders" || action === "limites" || action === "particulas") {
+    toggleZoneBorders(player);
+    return;
+  }
 
-  if (!action || (action !== "trust" && action !== "untrust") || !targetName) {
-    player.sendMessage("§b§l[§3Protección§b§l]§r §cUso: /s:zona confiar <jugador> o /s:zona desconfiar <jugador>");
+  if (action === "banderas" || action === "flags" || action === "config") {
+    const zones = getZonesAt(player.location, player.dimension.id);
+    const myZone = zones.find(z => !z.disabled && (normalizeZonePlayerName(z.owner) === normalizeZonePlayerName(player.name) || isPlayerOp(player)));
+    if (!myZone) {
+      player.sendMessage("§b§l[§3Protección§b§l]§r §cDebes estar dentro de tu terreno para configurar sus banderas.");
+      return;
+    }
+    openZoneFlagsGUI(player, myZone);
+    return;
+  }
+
+  if (action === "ayuda" || action === "help") {
+    player.sendMessage("§a§l=== COMANDOS DE TERRENOS (/s:zona) ===");
+    player.sendMessage("§b/s:zona bordes §7- Muestra/oculta los límites de tu terreno con partículas.");
+    player.sendMessage("§b/s:zona banderas §7- Configura permisos especiales (PvP, explosiones, puertas).");
+    player.sendMessage("§b/s:zona confiar <jugador> §7- Agrega a un amigo con permisos en tu terreno.");
+    player.sendMessage("§b/s:zona desconfiar <jugador> §7- Quita los permisos a un amigo.");
+    player.sendMessage("§b/s:zonas §7- Abre el menú visual de gestión de terrenos.");
+    return;
+  }
+
+  let trustAction = action;
+  if (trustAction === "confiar" || trustAction === "invitar" || trustAction === "amigo" || trustAction === "agregar") trustAction = "trust";
+  if (trustAction === "desconfiar" || trustAction === "revocar" || trustAction === "quitar" || trustAction === "expulsar") trustAction = "untrust";
+
+  if (!param || (trustAction !== "trust" && trustAction !== "untrust")) {
+    player.sendMessage("§b§l[§3Protección§b§l]§r §cUso: /s:zona confiar <jugador>, /s:zona desconfiar <jugador>, /s:zona bordes o /s:zona banderas");
     return;
   }
 
@@ -3034,27 +3064,31 @@ function handleTrustCommand(player, sub, targetName) {
     return;
   }
 
-  if (sub === "trust") {
+  if (trustAction === "trust") {
     if (!Array.isArray(zone.trusted)) zone.trusted = [];
-    const canonicalTarget = canonicalPlayerName(targetName);
+    const canonicalTarget = canonicalPlayerName(param);
     if (zone.trusted.some((entry) => normalizeZonePlayerName(entry) === normalizeZonePlayerName(canonicalTarget))) {
-      player.sendMessage(`§b§l[§3Protección§b§l]§r §cEl jugador §e${targetName} §cya tiene permisos.`);
+      player.sendMessage(`§b§l[§3Protección§b§l]§r §cEl jugador §e${param} §cya tiene permisos.`);
       return;
     }
     zone.trusted.push(canonicalTarget);
     player.sendMessage(`§b§l[§3Protección§b§l]§r §a¡Le has otorgado permisos a §e${canonicalTarget} §aen tu zona!`);
   } else {
     if (!Array.isArray(zone.trusted)) zone.trusted = [];
-    const idx = zone.trusted.findIndex((entry) => normalizeZonePlayerName(entry) === normalizeZonePlayerName(targetName));
+    const idx = zone.trusted.findIndex((entry) => normalizeZonePlayerName(entry) === normalizeZonePlayerName(param));
     if (idx === -1) {
-      player.sendMessage(`§b§l[§3Protección§b§l]§r §cEl jugador §e${targetName} §cno tiene permisos en tu zona.`);
+      player.sendMessage(`§b§l[§3Protección§b§l]§r §cEl jugador §e${param} §cno tiene permisos en tu zona.`);
       return;
     }
     zone.trusted.splice(idx, 1);
-    player.sendMessage(`§b§l[§3Protección§b§l]§r §aLe has retirado los permisos a §e${targetName} §aen tu zona.`);
+    player.sendMessage(`§b§l[§3Protección§b§l]§r §aLe has retirado los permisos a §e${param} §aen tu zona.`);
   }
 
   saveZones(db);
+}
+
+function handleTrustCommand(player, sub, targetName) {
+  return handleZoneCommand(player, sub, targetName);
 }
 
 // Eliminar protección admin (Solo OP)

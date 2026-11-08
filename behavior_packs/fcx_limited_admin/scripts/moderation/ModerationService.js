@@ -197,10 +197,27 @@ export class ModerationService {
     const id = entityId(player);
     const existing = this.freezeTimers.get(id);
     if (existing !== undefined) this.system.clearRun(existing);
+
+    try {
+      player.addTag("fcx_frozen");
+      player.addEffect("slowness", 12000, { amplifier: 255, showParticles: false });
+      player.addEffect("weakness", 12000, { amplifier: 255, showParticles: false });
+      player.onScreenDisplay?.setTitle("§c§l¡CONGELADO!");
+      player.onScreenDisplay?.setSubtitle("§eInspección del staff - No te desconectes");
+      player.sendMessage("§c§l[STAFF] ¡Has sido congelado para una revisión! No te desconectes o serás vetado permanentemente.");
+    } catch {}
+
     const timer = this.system.runInterval(() => {
       try {
         if (!player.isValid || Date.now() >= record.expiresAt) {
-          if (player.isValid) globalThis.__sqlite_set_prop_v2__("fcx_limited_admin", player, FREEZE_PROPERTY, undefined);
+          if (player.isValid) {
+            globalThis.__sqlite_set_prop_v2__("fcx_limited_admin", player, FREEZE_PROPERTY, undefined);
+            try {
+              player.removeTag("fcx_frozen");
+              player.runCommand("effect @s clear");
+              player.sendMessage("§a§l[STAFF] §eHas sido descongelado. Gracias por tu cooperación.");
+            } catch {}
+          }
           this.system.clearRun(timer); this.freezeTimers.delete(id); return;
         }
         player.teleport(record.anchor, { dimension: player.dimension });
@@ -216,6 +233,43 @@ export class ModerationService {
   }
 
   registerEnforcement() {
+    // Bloquear interacciones y rotura de bloques mientras esté congelado
+    const blockBreak = this.world.beforeEvents?.playerBreakBlock;
+    if (blockBreak?.subscribe) {
+      blockBreak.subscribe((event) => {
+        const record = this.readRecord(event.player, FREEZE_PROPERTY);
+        if (record && Number(record.expiresAt) > Date.now()) {
+          event.cancel = true;
+          this.system.run(() => {
+            try { event.player.sendMessage("§c[FCX Moderación] No puedes romper bloques mientras estás congelado."); } catch {}
+          });
+        }
+      });
+    }
+
+    const blockInteract = this.world.beforeEvents?.playerInteractWithBlock;
+    if (blockInteract?.subscribe) {
+      blockInteract.subscribe((event) => {
+        const record = this.readRecord(event.player, FREEZE_PROPERTY);
+        if (record && Number(record.expiresAt) > Date.now()) {
+          event.cancel = true;
+          this.system.run(() => {
+            try { event.player.sendMessage("§c[FCX Moderación] No puedes interactuar con contenedores o bloques mientras estás congelado."); } catch {}
+          });
+        }
+      });
+    }
+
+    const itemUse = this.world.beforeEvents?.itemUse;
+    if (itemUse?.subscribe) {
+      itemUse.subscribe((event) => {
+        const record = this.readRecord(event.source, FREEZE_PROPERTY);
+        if (record && Number(record.expiresAt) > Date.now()) {
+          event.cancel = true;
+        }
+      });
+    }
+
     const chat = this.world.beforeEvents?.chatSend;
     if (chat?.subscribe) chat.subscribe((event) => {
       const record = this.readRecord(event.sender, MUTE_PROPERTY);

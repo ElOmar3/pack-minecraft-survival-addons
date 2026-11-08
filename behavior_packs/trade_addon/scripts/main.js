@@ -649,11 +649,12 @@ function openOfferMenu(player, tradeId) {
     .body(`Negociando con: §b${otherName}§r\n\n¿Qué deseas ofrecer en este trato?\n(Nota: Si deseas ofrecer un item, sostenlo en tu mano principal antes de continuar)`)
     .button("⚔ Ofrecer objeto en mi mano")
     .button("💰 Ofrecer dinero ($)")
+    .button("💎 Ofrecer objeto + dinero (Combinado)")
     .button("⚪ No ofrecer nada (Regalo)")
     .button("❌ Cancelar intercambio");
     
   safeOpenForm(player, form, (response) => {
-    if (response.canceled || response.selection === 3) {
+    if (response.canceled || response.selection === 4) {
       cancelTrade(tradeId, `${player.name} canceló el intercambio.`);
       return;
     }
@@ -726,6 +727,50 @@ function openOfferMenu(player, tradeId) {
         });
       });
     } else if (response.selection === 2) {
+      // Ofrecer objeto en mano + dinero (Combinado)
+      const container = getInventory(player);
+      const offeredSlot = player.selectedSlotIndex;
+      const item = container ? container.getItem(offeredSlot) : null;
+      if (!item) {
+        player.sendMessage("§b§l[§3Intercambio§b§l]§r §cDebes sostener un objeto en tu mano principal.");
+        openOfferMenu(player, tradeId);
+        return;
+      }
+      const maxBal = Math.min(getBalance(player), MAX_TRADE_MONEY);
+      const formMixed = new ModalFormData()
+        .title("Oferta Combinada")
+        .slider(`Cantidad de ${item.nameTag || item.typeId.replace("minecraft:", "")} (Tienes ${item.amount})`, 1, item.amount, 1)
+        .slider(`Cantidad de dinero a añadir (Saldo: ${maxBal})`, 0, Math.max(1, maxBal), 1);
+
+      safeOpenForm(player, formMixed, (resMixed) => {
+        if (resMixed.canceled) {
+          openOfferMenu(player, tradeId);
+          return;
+        }
+        const qty = resMixed.formValues ? Math.floor(resMixed.formValues[0]) : 1;
+        const moneyAmt = resMixed.formValues ? Math.floor(resMixed.formValues[1]) : 0;
+        const currentItem = getInventory(player)?.getItem(offeredSlot);
+        if (!currentItem || !itemsMatchForTrade(currentItem, item, getItemFingerprint(item)) || qty < 1 || qty > currentItem.amount) {
+          cancelTrade(tradeId, `${player.name} cambió el objeto mientras definía su oferta.`);
+          return;
+        }
+        if (moneyAmt > getBalance(player) || moneyAmt > MAX_TRADE_MONEY) {
+          player.sendMessage("§b§l[§3Intercambio§b§l]§r §cTu saldo cambió. Define nuevamente la oferta.");
+          openOfferMenu(player, tradeId);
+          return;
+        }
+        setOffer(player, tradeId, {
+          type: "mixed",
+          itemTypeId: item.typeId,
+          amount: qty,
+          moneyAmount: moneyAmt,
+          displayName: `${item.nameTag || item.typeId.replace("minecraft:", "")} (x${qty}) + ${moneyAmt}`,
+          itemFingerprint: getItemFingerprint(item),
+          itemSnapshot: cloneItemForTrade(item, qty),
+          offeredSlot
+        });
+      });
+    } else if (response.selection === 3) {
       // Ofrecer nada
       setOffer(player, tradeId, {
         type: "none",
@@ -795,6 +840,53 @@ function openConfirmationMenu(player, tradeId, expectedVersion) {
   });
 }
 
+
+function startTradeCountdown(tradeId) {
+  const trade = activeTrades.get(tradeId);
+  if (!trade || trade.status !== "confirming") return;
+  trade.status = "countdown";
+
+  let seconds = 3;
+  const pA = world.getAllPlayers().find(p => p.name === trade.playerAName);
+  const pB = world.getAllPlayers().find(p => p.name === trade.playerBName);
+
+  if (!pA || !pB) {
+    cancelTrade(tradeId, "Uno de los jugadores se desconectó.");
+    return;
+  }
+
+  pA.sendMessage("§b§l[§3Intercambio§b§l]§r §a¡Ambos confirmaron! §eCuenta atrás de seguridad de 3 segundos iniciada...");
+  pB.sendMessage("§b§l[§3Intercambio§b§l]§r §a¡Ambos confirmaron! §eCuenta atrás de seguridad de 3 segundos iniciada...");
+
+  const intervalId = system.runInterval(() => {
+    const curTrade = activeTrades.get(tradeId);
+    if (!curTrade || curTrade.status !== "countdown") {
+      system.clearRun(intervalId);
+      return;
+    }
+
+    const curA = world.getAllPlayers().find(p => p.name === curTrade.playerAName);
+    const curB = world.getAllPlayers().find(p => p.name === curTrade.playerBName);
+    if (!curA || !curB) {
+      system.clearRun(intervalId);
+      cancelTrade(tradeId, "Uno de los jugadores se desconectó durante la cuenta atrás.");
+      return;
+    }
+
+    if (seconds > 0) {
+      curA.onScreenDisplay?.setActionBar(`§e⚡ Completando intercambio en §c${seconds}s§e... Revisa el inventario`);
+      curB.onScreenDisplay?.setActionBar(`§e⚡ Completando intercambio en §c${seconds}s§e... Revisa el inventario`);
+      try { curA.playSound("random.orb", { pitch: 1.0 + (3 - seconds) * 0.25 }); } catch (e) {}
+      try { curB.playSound("random.orb", { pitch: 1.0 + (3 - seconds) * 0.25 }); } catch (e) {}
+      seconds--;
+    } else {
+      system.clearRun(intervalId);
+      curTrade.status = "confirming";
+      executeTrade(tradeId);
+    }
+  }, 20);
+}
+
 function confirmPlayer(player, tradeId, expectedVersion) {
   const trade = activeTrades.get(tradeId);
   if (!trade || trade.status !== "confirming" || trade.version !== expectedVersion) return;
@@ -811,7 +903,7 @@ function confirmPlayer(player, tradeId, expectedVersion) {
   player.sendMessage("§b§l[§3Intercambio§b§l]§r §7Has confirmado el trato. Esperando confirmación final del otro jugador...");
   
   if (trade.confirmedA && trade.confirmedB) {
-    executeTrade(tradeId);
+    startTradeCountdown(tradeId);
   }
 }
 
@@ -830,10 +922,14 @@ function executeTrade(tradeId) {
   
   // 1. Validaciones finales: las ofertas quedan congeladas al entrar en ejecución.
   // Verificar Oferta A
-  if (trade.offerA.type === "item") {
+  if (trade.offerA.type === "item" || trade.offerA.type === "mixed") {
     const currentItem = getInventory(pA)?.getItem(trade.offerA.offeredSlot);
     if (!currentItem || currentItem.amount < trade.offerA.amount || !itemsMatchForTrade(currentItem, trade.offerA.itemSnapshot, trade.offerA.itemFingerprint)) {
       cancelTrade(tradeId, `Intercambio fallido: ${pA.name} ya no sostiene el item ofrecido en su mano principal.`);
+      return;
+    }
+    if (trade.offerA.type === "mixed" && getBalance(pA) < (trade.offerA.moneyAmount || 0)) {
+      cancelTrade(tradeId, `Intercambio fallido: ${pA.name} ya no tiene saldo suficiente.`);
       return;
     }
   } else if (trade.offerA.type === "money") {
@@ -844,10 +940,14 @@ function executeTrade(tradeId) {
   }
   
   // Verificar Oferta B
-  if (trade.offerB.type === "item") {
+  if (trade.offerB.type === "item" || trade.offerB.type === "mixed") {
     const currentItem = getInventory(pB)?.getItem(trade.offerB.offeredSlot);
     if (!currentItem || currentItem.amount < trade.offerB.amount || !itemsMatchForTrade(currentItem, trade.offerB.itemSnapshot, trade.offerB.itemFingerprint)) {
       cancelTrade(tradeId, `Intercambio fallido: ${pB.name} ya no sostiene el item ofrecido en su mano principal.`);
+      return;
+    }
+    if (trade.offerB.type === "mixed" && getBalance(pB) < (trade.offerB.moneyAmount || 0)) {
+      cancelTrade(tradeId, `Intercambio fallido: ${pB.name} ya no tiene saldo suficiente.`);
       return;
     }
   } else if (trade.offerB.type === "money") {
@@ -857,19 +957,21 @@ function executeTrade(tradeId) {
     }
   }
   
-  if (trade.offerA.type === "item" && !canFullyReceiveItem(pB, trade.offerA.itemSnapshot)) {
+  if ((trade.offerA.type === "item" || trade.offerA.type === "mixed") && !canFullyReceiveItem(pB, trade.offerA.itemSnapshot)) {
     cancelTrade(tradeId, `Intercambio fallido: ${pB.name} no tiene espacio para recibir la oferta.`);
     return;
   }
-  if (trade.offerB.type === "item" && !canFullyReceiveItem(pA, trade.offerB.itemSnapshot)) {
+  if ((trade.offerB.type === "item" || trade.offerB.type === "mixed") && !canFullyReceiveItem(pA, trade.offerB.itemSnapshot)) {
     cancelTrade(tradeId, `Intercambio fallido: ${pA.name} no tiene espacio para recibir la oferta.`);
     return;
   }
 
   const balanceA = getBalance(pA);
   const balanceB = getBalance(pB);
-  const finalBalanceA = balanceA - (trade.offerA.type === "money" ? trade.offerA.amount : 0) + (trade.offerB.type === "money" ? trade.offerB.amount : 0);
-  const finalBalanceB = balanceB - (trade.offerB.type === "money" ? trade.offerB.amount : 0) + (trade.offerA.type === "money" ? trade.offerA.amount : 0);
+  const moneyFromA = trade.offerA.type === "money" ? trade.offerA.amount : (trade.offerA.type === "mixed" ? (trade.offerA.moneyAmount || 0) : 0);
+  const moneyFromB = trade.offerB.type === "money" ? trade.offerB.amount : (trade.offerB.type === "mixed" ? (trade.offerB.moneyAmount || 0) : 0);
+  const finalBalanceA = balanceA - moneyFromA + moneyFromB;
+  const finalBalanceB = balanceB - moneyFromB + moneyFromA;
   if (finalBalanceA < 0 || finalBalanceB < 0 || finalBalanceA > MAX_MONEY || finalBalanceB > MAX_MONEY ||
       (finalBalanceA > MAX_OPERATIONAL_BALANCE && finalBalanceA > balanceA) ||
       (finalBalanceB > MAX_OPERATIONAL_BALANCE && finalBalanceB > balanceB)) {
@@ -902,14 +1004,14 @@ function executeTrade(tradeId) {
     restoreRemovedItems(receivedByBRemoved && removedA, receivedByARemoved && removedB);
   };
 
-  if (trade.offerA.type === "item") {
+  if (trade.offerA.type === "item" || trade.offerA.type === "mixed") {
     removedA = removeHandItem(pA, trade.offerA.itemTypeId, trade.offerA.amount, trade.offerA.itemFingerprint, trade.offerA.offeredSlot, trade.offerA.itemSnapshot);
     if (!removedA) {
       cancelTrade(tradeId, `Intercambio fallido: ${pA.name} cambió el item ofrecido en el último momento.`);
       return;
     }
   }
-  if (trade.offerB.type === "item") {
+  if (trade.offerB.type === "item" || trade.offerB.type === "mixed") {
     removedB = removeHandItem(pB, trade.offerB.itemTypeId, trade.offerB.amount, trade.offerB.itemFingerprint, trade.offerB.offeredSlot, trade.offerB.itemSnapshot);
     if (!removedB) {
       restoreRemovedItems();
@@ -923,7 +1025,7 @@ function executeTrade(tradeId) {
     cancelTrade(tradeId, "Intercambio fallido: no se pudieron aplicar los saldos.");
     return;
   }
-  if (trade.offerB.type === "item") {
+  if (trade.offerB.type === "item" || trade.offerB.type === "mixed") {
     deliveredToA = giveItem(pA, trade.offerB.itemSnapshot?.clone?.() || trade.offerB.itemSnapshot);
     if (!deliveredToA) {
       rollback();
@@ -931,7 +1033,7 @@ function executeTrade(tradeId) {
       return;
     }
   }
-  if (trade.offerA.type === "item") {
+  if (trade.offerA.type === "item" || trade.offerA.type === "mixed") {
     deliveredToB = giveItem(pB, trade.offerA.itemSnapshot?.clone?.() || trade.offerA.itemSnapshot);
     if (!deliveredToB) {
       rollback();
