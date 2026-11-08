@@ -1,0 +1,38 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Anti-Dupe Addon",
+    "description": "Deshabilita bundles vulnerables y contiene su uso con pistones e inventarios.",
+    "uuid": "14f2e519-9069-45e3-9844-3d607e4c274b",
+    "version": [
+      1,
+      2,
+      1
+    ],
+    "min_engine_version": [
+      1,
+      26,
+      0
+    ]
+  },
+  "modules": [
+    {
+      "description": "Script Anti-Dupe",
+      "type": "script",
+      "language": "javascript",
+      "uuid": "42f7c006-2580-4df2-a720-6d8ec5a1fa6c",
+      "version": [
+        1,
+        2,
+        1
+      ],
+      "entry": "scripts/main.js"
+    }
+  ],
+  "dependencies": [
+    {
+      "module_name": "@minecraft/server",
+      "version": "2.8.0"
+    }
+  ]
+}

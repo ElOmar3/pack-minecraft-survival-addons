@@ -1,0 +1,65 @@
+import { ErrorReporter } from "./ErrorReporter.js";
+import { system } from "@minecraft/server";
+
+export class PlayerStateManager {
+  static states = new Map();
+
+  static updateState(player) {
+    const name = player.name;
+    const currentLoc = player.location;
+    const now = Date.now();
+    
+    let state = this.states.get(name);
+    if (!state) {
+      state = {
+        history: [],
+        lastUpdate: now,
+        speedFlags: 0,
+        airTicks: 0,
+        phaseFlags: 0,
+        lastYaw: 0,
+        lastPitch: 0
+      };
+    }
+
+    let rotation = { x: 0, y: 0 };
+    try {
+      rotation = player.getRotation ? player.getRotation() : rotation;
+    } catch (e) { ErrorReporter.report(e, { addonId: "anticheat_addon", moduleId: "PlayerStateManager.js", operation: "try-catch", category: "runtime" });}
+
+    // Usar un ring buffer con tamaño máximo de 10 entradas para históricos
+    state.history.push({
+      x: currentLoc.x,
+      y: currentLoc.y,
+      z: currentLoc.z,
+      timestamp: now,
+      tick: system.currentTick,
+      onGround: player.isOnGround,
+      yaw: rotation.y,
+      pitch: rotation.x
+    });
+
+    if (state.history.length > 10) {
+      state.history.shift();
+    }
+
+    state.lastUpdate = now;
+    state.lastYaw = rotation.y;
+    state.lastPitch = rotation.x;
+    this.states.set(name, state);
+  }
+
+  static getState(playerName) {
+    return this.states.get(playerName);
+  }
+
+  static getPreviousLoc(playerName) {
+    const state = this.states.get(playerName);
+    if (!state || state.history.length < 2) return null;
+    return state.history[state.history.length - 2];
+  }
+
+  static clearPlayer(playerName) {
+    this.states.delete(playerName);
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "fixtures": {
+    "TOUCH_PREAIM_LEGITIMATE": {
+      "events": [{"delay": 8}, {"delay": 12}, {"delay": 9}, {"delay": 15}],
+      "context": {
+        "combatSessionId": "s1",
+        "targetId": "t1",
+        "targetInLineOfSight": true,
+        "eligibleTick": 100,
+        "rayEntryTick": 102,
+        "attackTick": 110,
+        "rayHitDepth": 0.1,
+        "inputContextEpoch": "MOBILE"
+      }
+    },
+    "PC_FAST_REACTION_LEGITIMATE": {
+      "events": [{"delay": 3}, {"delay": 4}, {"delay": 3}, {"delay": 5}],
+      "context": {
+        "combatSessionId": "s2",
+        "targetId": "t2",
+        "targetInLineOfSight": true,
+        "eligibleTick": 200,
+        "rayEntryTick": 201,
+        "attackTick": 204,
+        "rayHitDepth": 0.5,
+        "inputContextEpoch": "PC"
+      }
+    },
+    "HUMANIZED_TRIGGER_MULTI_TARGET": {
+      "events": [{"delay": 4}, {"delay": 6}, {"delay": 5}, {"delay": 7}],
+      "context": {
+        "combatSessionId": "s5",
+        "targetId": "t3",
+        "targetInLineOfSight": true,
+        "eligibleTick": 500,
+        "rayEntryTick": 500,
+        "attackTick": 505,
+        "rayHitDepth": 0.8,
+        "inputContextEpoch": "PC"
+      }
+    }
+  }
+}

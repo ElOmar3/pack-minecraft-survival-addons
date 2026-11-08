@@ -1,0 +1,46 @@
+[
+    {
+        "name": "ANTI_KB_COMPLETE",
+        "impactEvent": { "timestamp": 1000, "sourceId": "p1", "targetId": "p2", "knockbackAmount": 1.0, "type": "melee" },
+        "preState": { "x": 0, "y": 0, "z": 0, "timestamp": 990 },
+        "postStates": [
+            { "x": 0, "y": 0, "z": 0, "timestamp": 1050 }
+        ],
+        "entity": { "knockbackResistance": 0 },
+        "constraints": { "onGround": true, "touchingWall": false, "touchingCeiling": false },
+        "expectedThreat": "ANTI_KB_COMPLETE"
+    },
+    {
+        "name": "TOUCH_TO_PC_WALL_CONSTRAINED_LEGITIMATE",
+        "impactEvent": { "timestamp": 1000, "sourceId": "p1", "targetId": "p2", "knockbackAmount": 1.0, "type": "melee" },
+        "preState": { "x": 0, "y": 0, "z": 0, "timestamp": 990 },
+        "postStates": [
+            { "x": 0.05, "y": 0.05, "z": 0.05, "timestamp": 1050 }
+        ],
+        "entity": { "knockbackResistance": 0 },
+        "constraints": { "onGround": true, "touchingWall": true, "touchingCeiling": false },
+        "expectedThreat": null
+    },
+    {
+        "name": "MANUAL_COUNTER_MOVEMENT_LEGITIMATE",
+        "impactEvent": { "timestamp": 1000, "sourceId": "p1", "targetId": "p2", "knockbackAmount": 1.0, "type": "melee" },
+        "preState": { "x": 0, "y": 0, "z": 0, "timestamp": 990 },
+        "postStates": [
+            { "x": 0.4, "y": 0.4, "z": 0, "timestamp": 1050 }
+        ],
+        "entity": { "knockbackResistance": 0 },
+        "constraints": { "onGround": false, "touchingWall": false, "touchingCeiling": false },
+        "expectedThreat": null
+    },
+    {
+        "name": "HUMANIZED_ANTI_KB_COMBO",
+        "impactEvent": { "timestamp": 1000, "sourceId": "p1", "targetId": "p2", "knockbackAmount": 1.0, "type": "melee" },
+        "preState": { "x": 0, "y": 0, "z": 0, "timestamp": 990 },
+        "postStates": [
+            { "x": 0.1, "y": 0.1, "z": 0, "timestamp": 1050 }
+        ],
+        "entity": { "knockbackResistance": 0 },
+        "constraints": { "onGround": false, "touchingWall": false, "touchingCeiling": false },
+        "expectedThreat": "ANTI_KB_PARTIAL"
+    }
+]

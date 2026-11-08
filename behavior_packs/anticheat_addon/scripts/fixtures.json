@@ -1,0 +1,32 @@
+{
+    "TOUCH_TO_KEYBOARD_LEGITIMATE": {
+        "state": {
+            "targetBearingYaw": 45,
+            "currentYaw": 50
+        },
+        "dataQuality": {
+            "latency": 50,
+            "interpolations": 0
+        }
+    },
+    "GAMEPAD_SMOOTH_TRACKING_LEGITIMATE": {
+        "state": {
+            "targetBearingYaw": 90,
+            "currentYaw": 95
+        },
+        "dataQuality": {
+            "latency": 60,
+            "interpolations": 1
+        }
+    },
+    "HUMANIZED_AIMASSIST_MULTI_TARGET": {
+        "state": {
+            "targetBearingYaw": 180,
+            "currentYaw": 180.1
+        },
+        "dataQuality": {
+            "latency": 40,
+            "interpolations": 0
+        }
+    }
+}

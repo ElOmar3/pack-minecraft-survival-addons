@@ -1,0 +1,39 @@
+[
+    {
+        "name": "TOUCH_AUTOJUMP_LEGITIMATE",
+        "ticks": [
+            { "oldPos": {"x": 0, "y": 0, "z": 0}, "newPos": {"x": 0.25, "y": 0, "z": 0}, "deltaTime": 0.05, "playerState": {"isSprinting": false}, "blockUnderneath": "minecraft:stone", "inputContext": "TOUCH" },
+            { "oldPos": {"x": 0.25, "y": 0, "z": 0}, "newPos": {"x": 0.5, "y": 0, "z": 0}, "deltaTime": 0.05, "playerState": {"isSprinting": false}, "blockUnderneath": "minecraft:stone", "inputContext": "TOUCH" }
+        ],
+        "expected": {
+            "speedThreatModel": "NONE",
+            "bhopThreatModel": "NONE"
+        }
+    },
+    {
+        "name": "PC_ICE_SPRINT_LEGITIMATE",
+        "ticks": [
+            { "oldPos": {"x": 0, "y": 0, "z": 0}, "newPos": {"x": 0.4, "y": 0, "z": 0}, "deltaTime": 0.05, "playerState": {"isSprinting": true}, "blockUnderneath": "minecraft:ice", "inputContext": "PC" },
+            { "oldPos": {"x": 0.4, "y": 0, "z": 0}, "newPos": {"x": 0.8, "y": 0, "z": 0}, "deltaTime": 0.05, "playerState": {"isSprinting": true}, "blockUnderneath": "minecraft:ice", "inputContext": "PC" }
+        ],
+        "expected": {
+            "speedThreatModel": "NONE",
+            "bhopThreatModel": "NONE"
+        }
+    },
+    {
+        "name": "HUMANIZED_SPEED_BHOP",
+        "ticks": [
+            { "oldPos": {"x": 0, "y": 0, "z": 0}, "newPos": {"x": 1.0, "y": 0, "z": 0}, "deltaTime": 0.05, "playerState": {"isSprinting": true}, "blockUnderneath": "minecraft:stone", "inputContext": "PC" },
+            { "oldPos": {"x": 1.0, "y": 0, "z": 0}, "newPos": {"x": 2.0, "y": 4.0, "z": 0}, "deltaTime": 0.05, "playerState": {"isSprinting": true}, "blockUnderneath": "minecraft:stone", "inputContext": "PC" },
+            { "oldPos": {"x": 2.0, "y": 4.0, "z": 0}, "newPos": {"x": 3.0, "y": 0.0, "z": 0}, "deltaTime": 0.05, "playerState": {"isSprinting": true}, "blockUnderneath": "minecraft:stone", "inputContext": "PC" },
+            { "oldPos": {"x": 3.0, "y": 0.0, "z": 0}, "newPos": {"x": 4.0, "y": 4.0, "z": 0}, "deltaTime": 0.05, "playerState": {"isSprinting": true}, "blockUnderneath": "minecraft:stone", "inputContext": "PC" },
+            { "oldPos": {"x": 4.0, "y": 4.0, "z": 0}, "newPos": {"x": 5.0, "y": 0.0, "z": 0}, "deltaTime": 0.05, "playerState": {"isSprinting": true}, "blockUnderneath": "minecraft:stone", "inputContext": "PC" },
+            { "oldPos": {"x": 5.0, "y": 0.0, "z": 0}, "newPos": {"x": 6.0, "y": 4.0, "z": 0}, "deltaTime": 0.05, "playerState": {"isSprinting": true}, "blockUnderneath": "minecraft:stone", "inputContext": "PC" }
+        ],
+        "expected": {
+            "speedThreatModel": "SPEED_BURST",
+            "bhopThreatModel": "BUNNYHOP"
+        }
+    }
+]

@@ -1,0 +1,17 @@
+{
+    "TOUCH_HOLD_BRIDGE_LEGITIMATE": [
+        {"player": {"id": "1", "headPos": {"x": 0, "y": 2, "z": 0}, "viewVector": {"x": 0, "y": -0.7, "z": 0.7}}, "block": {"pos": {"x": 0, "y": 0, "z": 1}}, "supportFaceNormal": {"x": 0, "y": 1, "z": 0}, "timestamp": 1000, "timeSinceLastRotation": 200},
+        {"player": {"id": "1", "headPos": {"x": 0, "y": 2, "z": 1}, "viewVector": {"x": 0, "y": -0.7, "z": 0.7}}, "block": {"pos": {"x": 0, "y": 0, "z": 2}}, "supportFaceNormal": {"x": 0, "y": 1, "z": 0}, "timestamp": 1250, "timeSinceLastRotation": 250},
+        {"player": {"id": "1", "headPos": {"x": 0, "y": 2, "z": 2}, "viewVector": {"x": 0, "y": -0.7, "z": 0.7}}, "block": {"pos": {"x": 0, "y": 0, "z": 3}}, "supportFaceNormal": {"x": 0, "y": 1, "z": 0}, "timestamp": 1500, "timeSinceLastRotation": 250}
+    ],
+    "PC_FAST_BRIDGE_LEGITIMATE": [
+        {"player": {"id": "2", "headPos": {"x": 0, "y": 2, "z": 0}, "viewVector": {"x": 0, "y": -0.7, "z": 0.7}}, "block": {"pos": {"x": 0, "y": 0, "z": 1}}, "supportFaceNormal": {"x": 0, "y": 1, "z": 0}, "timestamp": 1000, "timeSinceLastRotation": 200},
+        {"player": {"id": "2", "headPos": {"x": 0, "y": 2, "z": 1}, "viewVector": {"x": 0, "y": -0.7, "z": 0.7}}, "block": {"pos": {"x": 0, "y": 0, "z": 2}}, "supportFaceNormal": {"x": 0, "y": 1, "z": 0}, "timestamp": 1100, "timeSinceLastRotation": 100},
+        {"player": {"id": "2", "headPos": {"x": 0, "y": 2, "z": 2}, "viewVector": {"x": 0, "y": -0.7, "z": 0.7}}, "block": {"pos": {"x": 0, "y": 0, "z": 3}}, "supportFaceNormal": {"x": 0, "y": 1, "z": 0}, "timestamp": 1200, "timeSinceLastRotation": 100}
+    ],
+    "HUMANIZED_SCAFFOLD_EXPAND": [
+        {"player": {"id": "3", "headPos": {"x": 0, "y": 2, "z": 0}, "viewVector": {"x": 0, "y": 1, "z": 0}}, "block": {"pos": {"x": 1, "y": 0, "z": 0}}, "supportFaceNormal": {"x": -1, "y": 0, "z": 0}, "timestamp": 1000, "timeSinceLastRotation": 200},
+        {"player": {"id": "3", "headPos": {"x": 0, "y": 2, "z": 0}, "viewVector": {"x": 0, "y": 1, "z": 0}}, "block": {"pos": {"x": 2, "y": 0, "z": 0}}, "supportFaceNormal": {"x": -1, "y": 0, "z": 0}, "timestamp": 1200, "timeSinceLastRotation": 200},
+        {"player": {"id": "3", "headPos": {"x": 0, "y": 2, "z": 0}, "viewVector": {"x": 0, "y": 1, "z": 0}}, "block": {"pos": {"x": 3, "y": 0, "z": 0}}, "supportFaceNormal": {"x": -1, "y": 0, "z": 0}, "timestamp": 1400, "timeSinceLastRotation": 200}
+    ]
+}

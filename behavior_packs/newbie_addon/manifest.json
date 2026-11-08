@@ -1,0 +1,37 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "New Player Experience Addon",
+    "description": "Bienvenida para nuevos jugadores y Teletransporte Aleatorio (RTP)",
+    "uuid": "2f34567e-a89b-11ec-b909-0242ac120002",
+    "version": [
+      1,
+      0,
+      2
+    ],
+    "min_engine_version": [
+      1,
+      21,
+      80
+    ]
+  },
+  "modules": [
+    {
+      "type": "script",
+      "language": "javascript",
+      "uuid": "3a45678f-b90c-22fd-c010-0353bc230003",
+      "version": [
+        1,
+        0,
+        2
+      ],
+      "entry": "scripts/main.js"
+    }
+  ],
+  "dependencies": [
+    {
+      "module_name": "@minecraft/server",
+      "version": "2.8.0"
+    }
+  ]
+}

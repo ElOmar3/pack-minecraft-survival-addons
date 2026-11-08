@@ -1,0 +1,34 @@
+{
+    "PC_MANUAL_HOTKEY_LEGITIMATE": {
+        "context": {
+            "hitTick": 100,
+            "inputEpochTicks": 10,
+            "bestWeaponSelected": false
+        },
+        "window": [
+            { "tick": 98, "type": "slot_change", "slot": 2 }
+        ],
+        "expectedThreatModel": "LEGITIMATE_FAST_SWITCH"
+    },
+    "TOUCH_BUILD_TO_COMBAT_LEGITIMATE": {
+        "context": {
+            "hitTick": 200,
+            "isBuilding": true
+        },
+        "window": [
+            { "tick": 195, "type": "slot_change", "slot": 1 }
+        ],
+        "expectedEvidences": 0
+    },
+    "HUMANIZED_AUTO_WEAPON_MULTI_TARGET": {
+        "context": {
+            "hitTick": 300,
+            "isMultiTarget": true,
+            "inputEpochTicks": 50
+        },
+        "window": [
+            { "tick": 298, "type": "slot_change", "slot": 0 }
+        ],
+        "expectedThreatModel": "HUMANIZED_AUTO_WEAPON"
+    }
+}

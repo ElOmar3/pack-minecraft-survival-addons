@@ -1,0 +1,56 @@
+[
+  {
+    "scenario": "TOUCH_TO_PC_AIRBORNE_LEGITIMATE",
+    "events": [
+      { "tick": 100, "type": "attack", "attackerId": "p1", "targetId": "p2", "position": { "x": 0, "y": 70, "z": 0 }, "velocity": { "x": 0, "y": -0.5, "z": 0 }, "isOnGround": false, "hasGroundSupport": false },
+      { "tick": 101, "type": "damage", "sourceId": "p1", "targetId": "p2", "damage": 10 }
+    ],
+    "baseDamage": 7,
+    "expectedThreat": "NONE"
+  },
+  {
+    "scenario": "GROUND_SPOOF_CRITICAL_CANDIDATE",
+    "events": [
+      { "tick": 100, "type": "attack", "attackerId": "p1", "targetId": "p2", "position": { "x": 0, "y": 70.01, "z": 0 }, "velocity": { "x": 0, "y": -0.1, "z": 0 }, "isOnGround": false, "hasGroundSupport": true },
+      { "tick": 101, "type": "damage", "sourceId": "p1", "targetId": "p2", "damage": 10 }
+    ],
+    "baseDamage": 7,
+    "expectedThreat": "GROUND_SPOOF_CRITICAL_CANDIDATE"
+  },
+  {
+    "scenario": "HUMANIZED_CRITICAL_PATTERN",
+    "events": [
+      { "tick": 100, "type": "attack", "attackerId": "p1", "targetId": "p2", "position": { "x": 0, "y": 70, "z": 0 }, "velocity": { "x": 0, "y": -0.5, "z": 0 }, "isOnGround": false, "hasGroundSupport": false },
+      { "tick": 101, "type": "damage", "sourceId": "p1", "targetId": "p2", "damage": 10 },
+      { "tick": 120, "type": "attack", "attackerId": "p1", "targetId": "p2", "position": { "x": 0, "y": 70, "z": 0 }, "velocity": { "x": 0, "y": -0.5, "z": 0 }, "isOnGround": false, "hasGroundSupport": false },
+      { "tick": 121, "type": "damage", "sourceId": "p1", "targetId": "p2", "damage": 10 },
+      { "tick": 140, "type": "attack", "attackerId": "p1", "targetId": "p2", "position": { "x": 0, "y": 70, "z": 0 }, "velocity": { "x": 0, "y": -0.5, "z": 0 }, "isOnGround": false, "hasGroundSupport": false },
+      { "tick": 141, "type": "damage", "sourceId": "p1", "targetId": "p2", "damage": 10 },
+      { "tick": 160, "type": "attack", "attackerId": "p1", "targetId": "p2", "position": { "x": 0, "y": 70, "z": 0 }, "velocity": { "x": 0, "y": -0.5, "z": 0 }, "isOnGround": false, "hasGroundSupport": false },
+      { "tick": 161, "type": "damage", "sourceId": "p1", "targetId": "p2", "damage": 10 },
+      { "tick": 180, "type": "attack", "attackerId": "p1", "targetId": "p2", "position": { "x": 0, "y": 70, "z": 0 }, "velocity": { "x": 0, "y": -0.5, "z": 0 }, "isOnGround": false, "hasGroundSupport": false },
+      { "tick": 181, "type": "damage", "sourceId": "p1", "targetId": "p2", "damage": 10 }
+    ],
+    "baseDamage": 7,
+    "expectedThreat": "ALWAYS_CRITICAL_PATTERN"
+  },
+  {
+    "scenario": "FORCED_CRITICAL_CANDIDATE",
+    "events": [
+      { "tick": 100, "type": "attack", "attackerId": "p1", "targetId": "p2", "position": { "x": 0, "y": 70, "z": 0 }, "velocity": { "x": 0, "y": 0.1, "z": 0 }, "isOnGround": false, "hasGroundSupport": false },
+      { "tick": 101, "type": "damage", "sourceId": "p1", "targetId": "p2", "damage": 10 }
+    ],
+    "baseDamage": 7,
+    "expectedThreat": "FORCED_CRITICAL_CANDIDATE"
+  },
+  {
+    "scenario": "MICRO_HOP_CRITICAL_CANDIDATE",
+    "events": [
+      { "tick": 98, "type": "movement", "attackerId": "p1", "isOnGround": true },
+      { "tick": 100, "type": "attack", "attackerId": "p1", "targetId": "p2", "position": { "x": 0, "y": 70.1, "z": 0 }, "velocity": { "x": 0, "y": -0.1, "z": 0 }, "isOnGround": false, "hasGroundSupport": false },
+      { "tick": 101, "type": "damage", "sourceId": "p1", "targetId": "p2", "damage": 10 }
+    ],
+    "baseDamage": 7,
+    "expectedThreat": "MICRO_HOP_CRITICAL_CANDIDATE"
+  }
+]

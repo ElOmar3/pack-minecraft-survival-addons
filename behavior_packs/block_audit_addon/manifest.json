@@ -1,0 +1,6 @@
+{
+  "format_version": 2,
+  "header": {"name":"Block Audit Addon","description":"Auditoría acotada de bloques","uuid":"6e34f0a1-5c84-4b16-9e51-0e9b2af7319c","version":[1,0,0],"min_engine_version":[1,21,80]},
+  "modules": [{"type":"script","language":"javascript","uuid":"9c9d3f34-2e45-4a89-844e-8057a4b11c7c","version":[1,0,0],"entry":"scripts/main.js"}],
+  "dependencies": [{"module_name":"@minecraft/server","version":"2.8.0"}]
+}

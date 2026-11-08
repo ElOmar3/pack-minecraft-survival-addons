@@ -1,0 +1,46 @@
+{
+  "TOUCH_TO_PC_INVENTORY_LEGITIMATE": [
+    {
+      "playerId": "player1",
+      "tick": 100,
+      "health": 20,
+      "inventory": { "offhand": "minecraft:air" }
+    },
+    {
+      "playerId": "player1",
+      "tick": 140,
+      "health": 20,
+      "inventory": { "offhand": "minecraft:totem_of_undying" }
+    }
+  ],
+  "INSTANT_REFILL_CANDIDATE": [
+    {
+      "playerId": "player2",
+      "tick": 200,
+      "health": 4,
+      "inventory": { "offhand": "minecraft:air" }
+    },
+    {
+      "playerId": "player2",
+      "tick": 201,
+      "health": 4,
+      "inventory": { "offhand": "minecraft:totem_of_undying" }
+    }
+  ],
+  "MULTI_SLOT_ARMOR_SPOOF": [
+    {
+      "playerId": "player3",
+      "tick": 300,
+      "health": 10,
+      "inCombat": true,
+      "inventory": { "head": "minecraft:air", "chest": "minecraft:air" }
+    },
+    {
+      "playerId": "player3",
+      "tick": 301,
+      "health": 10,
+      "inCombat": true,
+      "inventory": { "head": "minecraft:diamond_helmet", "chest": "minecraft:diamond_chestplate" }
+    }
+  ]
+}

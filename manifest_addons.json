@@ -1,0 +1,293 @@
+{
+  "server_version_tested": "1.26.32.2",
+  "script_api_module": "@minecraft/server 2.8.0",
+  "total_packs": 26,
+  "packs": [
+    {
+      "order": 1,
+      "folder": "core_commands_addon",
+      "name": "Core Commands Addon",
+      "uuid": "1cb55f74-69ff-4b7f-9b2a-5c9fa0a45e61",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 2,
+      "folder": "currency_addon",
+      "name": "Virtual Currency Addon",
+      "uuid": "c11e64f8-0b3c-4f8f-95f0-2f4f1f67b5e2",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 3,
+      "folder": "warps_addon",
+      "name": "Warps Addon",
+      "uuid": "d11a4504-27f2-4be4-970a-a441725b303d",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 4,
+      "folder": "shop_addon",
+      "name": "Shop UI Addon",
+      "uuid": "d86f7881-8b9a-4c9f-8dfa-3f9cfb9f9e2f",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 5,
+      "folder": "ranks_addon",
+      "name": "Ranks & Titles Addon",
+      "uuid": "b31a4504-27f2-4be4-970a-a441725b303d",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 6,
+      "folder": "quests_addon",
+      "name": "Side Quests Addon",
+      "uuid": "b22e64f8-0b3c-4f8f-95f0-2f4f1f67b5f0",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 7,
+      "folder": "rewards_addon",
+      "name": "Rewards & Kits Addon",
+      "uuid": "c41a4504-27f2-4be4-970a-a441725b303d",
+      "version": [
+        1,
+        0,
+        1
+      ]
+    },
+    {
+      "order": 8,
+      "folder": "camera_follower_addon",
+      "name": "Camera Follower Addon",
+      "uuid": "a86f7881-8b9a-4c9f-8dfa-3f9cfb9f9e80",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 9,
+      "folder": "casino_addon",
+      "name": "Casino Addon",
+      "uuid": "841a4504-27f2-4be4-970a-a441725b303d",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 10,
+      "folder": "auction_house_addon",
+      "name": "Auction House Addon",
+      "uuid": "a51a4504-27f2-4be4-970a-a441725b303d",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 11,
+      "folder": "crates_addon",
+      "name": "Crates Addon",
+      "uuid": "5d324a61-15d6-4fb8-b075-4dcd440bec0e",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 12,
+      "folder": "horde_event_addon",
+      "name": "Mob Horde Event Addon",
+      "uuid": "a11e64f8-0b3c-4f8f-95f0-2f4f1f67b5e3",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 13,
+      "folder": "lag_cleaner_addon",
+      "name": "Lag Cleaner Addon",
+      "uuid": "f86f7881-8b9a-4c9f-8dfa-3f9cfb9f9e31",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 14,
+      "folder": "mining_fever_addon",
+      "name": "Mining Fever Event Addon",
+      "uuid": "b11e64f8-0b3c-4f8f-95f0-2f4f1f67b5e4",
+      "version": [
+        1,
+        1,
+        0
+      ]
+    },
+    {
+      "order": 15,
+      "folder": "trade_addon",
+      "name": "Trade UI Addon",
+      "uuid": "e86f7881-8b9a-4c9f-8dfa-3f9cfb9f9e30",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 16,
+      "folder": "home_spawn_addon",
+      "name": "Home and Spawn Addon",
+      "uuid": "a86f7881-8b9a-4c9f-8dfa-3f9cfb9f9e1e",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 17,
+      "folder": "clans_addon",
+      "name": "Clans Addon",
+      "uuid": "c21e64f8-0b3c-4f8f-95f0-2f4f1f67b5e5",
+      "version": [
+        1,
+        0,
+        1
+      ]
+    },
+    {
+      "order": 18,
+      "folder": "protection_addon",
+      "name": "Zone Protection Addon",
+      "uuid": "e21a4504-27f2-4be4-970a-a441725b303d",
+      "version": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "order": 19,
+      "folder": "jobs_addon",
+      "name": "Jobs Addon",
+      "uuid": "9f26bb1c-b540-4701-bdb8-d0f0e8f18d81",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 20,
+      "folder": "blood_moon_addon",
+      "name": "Blood Moon Event Addon",
+      "uuid": "f2c41c7e-b6a8-4e1b-94fa-6a84d4369e57",
+      "version": [
+        1,
+        0,
+        1
+      ]
+    },
+    {
+      "order": 21,
+      "folder": "newbie_addon",
+      "name": "New Player Experience Addon",
+      "uuid": "2f34567e-a89b-11ec-b909-0242ac120002",
+      "version": [
+        1,
+        0,
+        2
+      ]
+    },
+    {
+      "order": 22,
+      "folder": "anticheat_addon",
+      "name": "Anti-Cheat Addon",
+      "uuid": "b78e1215-fb8b-4a57-b248-cb580ee4f1ab",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 23,
+      "folder": "antidupe_addon",
+      "name": "Anti-Dupe Addon",
+      "uuid": "14f2e519-9069-45e3-9844-3d607e4c274b",
+      "version": [
+        1,
+        2,
+        1
+      ]
+    },
+    {
+      "order": 24,
+      "folder": "fcx_limited_admin",
+      "name": "FCX Limited Admin",
+      "uuid": "2ae00a1d-aec0-445e-b286-248150e1ba31",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 25,
+      "folder": "block_audit_addon",
+      "name": "Block Audit Addon",
+      "uuid": "6e34f0a1-5c84-4b16-9e51-0e9b2af7319c",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "order": 26,
+      "folder": "server_boosters_addon",
+      "name": "Server Boosters and Perks Addon",
+      "uuid": "7e85984b-78c3-460c-81b0-abcd543543a7",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    }
+  ]
+}

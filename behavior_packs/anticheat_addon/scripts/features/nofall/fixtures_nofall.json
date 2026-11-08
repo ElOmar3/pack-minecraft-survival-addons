@@ -1,0 +1,32 @@
+[
+  {
+    "name": "TOUCH_TO_PC_FEATHER_FALLING_LEGITIMATE",
+    "events": [
+      { "type": "INPUT_CHANGE", "context": "TOUCH" },
+      { "safeState": { "valid": true, "onGround": false, "motionY": -1.0, "fallDistance": 10 }, "mitigationFactor": 0.48, "surfaceMitigation": 0, "actualDamage": 3 },
+      { "type": "INPUT_CHANGE", "context": "PC" },
+      { "safeState": { "valid": true, "onGround": true, "motionY": 0, "fallDistance": 10 }, "mitigationFactor": 0.48, "surfaceMitigation": 0, "actualDamage": 3, "environmentContext": {} }
+    ],
+    "expectedFindings": []
+  },
+  {
+    "name": "WATER_CLUTCH_LEGITIMATE",
+    "events": [
+      { "safeState": { "valid": true, "onGround": false, "motionY": -2.0, "fallDistance": 20 } },
+      { "safeState": { "valid": true, "onGround": true, "motionY": 0, "fallDistance": 20 }, "mitigationFactor": 0, "surfaceMitigation": 1.0, "actualDamage": 0, "environmentContext": { "inWater": true, "legitimateReset": true } }
+    ],
+    "expectedFindings": []
+  },
+  {
+    "name": "HUMANIZED_INTERMITTENT_NOFALL",
+    "events": [
+      { "safeState": { "valid": true, "onGround": false, "motionY": -1.0, "fallDistance": 10 } },
+      { "safeState": { "valid": true, "onGround": true, "motionY": 0, "fallDistance": 10 }, "mitigationFactor": 0, "surfaceMitigation": 0, "actualDamage": 0, "environmentContext": {} },
+      { "safeState": { "valid": true, "onGround": false, "motionY": -1.0, "fallDistance": 10 } },
+      { "safeState": { "valid": true, "onGround": true, "motionY": 0, "fallDistance": 10 }, "mitigationFactor": 0, "surfaceMitigation": 0, "actualDamage": 0, "environmentContext": {} },
+      { "safeState": { "valid": true, "onGround": false, "motionY": -1.0, "fallDistance": 10 } },
+      { "safeState": { "valid": true, "onGround": true, "motionY": 0, "fallDistance": 10 }, "mitigationFactor": 0, "surfaceMitigation": 0, "actualDamage": 0, "environmentContext": {} }
+    ],
+    "expectedFindings": ["NOFALL_MISSING_DAMAGE_REPEATED", "NOFALL_DAMAGE_SUPPRESSION", "NOFALL_ZERO_DAMAGE", "NOFALL_GROUND_SPOOF_CANDIDATE"]
+  }
+]

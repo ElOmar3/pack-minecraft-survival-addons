@@ -1,0 +1,43 @@
+{
+    "fixtures": [
+        {
+            "name": "Hidden Diamond Mined",
+            "blockPosition": { "x": 10, "y": -50, "z": 20 },
+            "blockId": "minecraft:diamond_ore",
+            "snapshot": {
+                "11_-50_20": "minecraft:stone",
+                "9_-50_20": "minecraft:stone",
+                "10_-49_20": "minecraft:stone",
+                "10_-51_20": "minecraft:stone",
+                "10_-50_21": "minecraft:stone",
+                "10_-50_19": "minecraft:stone"
+            }
+        },
+        {
+            "name": "Visible Diamond Mined",
+            "blockPosition": { "x": 20, "y": -50, "z": 30 },
+            "blockId": "minecraft:diamond_ore",
+            "snapshot": {
+                "21_-50_30": "minecraft:air",
+                "19_-50_30": "minecraft:stone",
+                "20_-49_30": "minecraft:stone",
+                "20_-51_30": "minecraft:stone",
+                "20_-50_31": "minecraft:stone",
+                "20_-50_29": "minecraft:stone"
+            }
+        },
+        {
+            "name": "Normal Stone Mined",
+            "blockPosition": { "x": 15, "y": -50, "z": 25 },
+            "blockId": "minecraft:stone",
+            "snapshot": {
+                "16_-50_25": "minecraft:stone",
+                "14_-50_25": "minecraft:stone",
+                "15_-49_25": "minecraft:stone",
+                "15_-51_25": "minecraft:stone",
+                "15_-50_26": "minecraft:stone",
+                "15_-50_24": "minecraft:stone"
+            }
+        }
+    ]
+}

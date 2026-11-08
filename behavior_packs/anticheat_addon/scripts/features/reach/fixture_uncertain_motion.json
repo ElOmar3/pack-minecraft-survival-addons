@@ -1,0 +1,98 @@
+[
+  {
+    "extraction": {
+      "valid": true,
+      "observedReach": 2.9000000000000004,
+      "horizontalReach": 2.9000000000000004,
+      "verticalDifference": 0,
+      "closestPoint": {
+        "x": 2.9000000000000004,
+        "y": 1.62,
+        "z": 0
+      },
+      "originPosition": {
+        "x": 0,
+        "y": 1.62,
+        "z": 0
+      },
+      "originSource": "head_location",
+      "volumeSource": "ApproximatePlayerVolumeProvider",
+      "baseAllowedReach": 3,
+      "geometryAllowance": 0.16000000000000003,
+      "motionAllowance": 0.25,
+      "timingAllowance": 0.15,
+      "totalAllowedEnvelope": 3.56,
+      "reachExcess": -0.6599999999999997,
+      "normalizedReachExcess": 0,
+      "relativeVelocity": {
+        "x": 4,
+        "y": 0,
+        "z": 0
+      },
+      "separatingVelocity": 4,
+      "geometryConfidence": 0.8,
+      "timingConfidence": 1,
+      "result": "VALID",
+      "warnings": [],
+      "targetId": "t1",
+      "correlationGroup": "a1-t1"
+    },
+    "evaluation": {
+      "hitCount": 1,
+      "validHitCount": 1,
+      "excessHitCount": 0,
+      "independentTargets": 1,
+      "hasViolation": false,
+      "evidenceRecords": []
+    },
+    "evidencePacket": null
+  },
+  {
+    "extraction": {
+      "valid": true,
+      "observedReach": 3,
+      "horizontalReach": 3,
+      "verticalDifference": 0,
+      "closestPoint": {
+        "x": 3,
+        "y": 1.62,
+        "z": 0
+      },
+      "originPosition": {
+        "x": 0,
+        "y": 1.62,
+        "z": 0
+      },
+      "originSource": "head_location",
+      "volumeSource": "ApproximatePlayerVolumeProvider",
+      "baseAllowedReach": 3,
+      "geometryAllowance": 0.16000000000000003,
+      "motionAllowance": 0.25,
+      "timingAllowance": 0,
+      "totalAllowedEnvelope": 3.41,
+      "reachExcess": -0.41000000000000014,
+      "normalizedReachExcess": 0,
+      "relativeVelocity": {
+        "x": 4,
+        "y": 0,
+        "z": 0
+      },
+      "separatingVelocity": 4,
+      "geometryConfidence": 0.8,
+      "timingConfidence": 0.5,
+      "result": "VALID",
+      "warnings": [],
+      "targetId": "t1",
+      "correlationGroup": "a1-t1"
+    },
+    "evaluation": {
+      "hitCount": 2,
+      "validHitCount": 2,
+      "excessHitCount": 0,
+      "independentTargets": 1,
+      "hasViolation": false,
+      "evidenceRecords": []
+    },
+    "evidencePacket": null
+  }
+]
