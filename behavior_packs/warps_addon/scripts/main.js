@@ -77,6 +77,7 @@ try {
   if (!globalThis.__sqlite_listener_callback_v3__) {
     const callback = function(event) {
     if (!event || (event.id !== "sqlite:load" && event.id !== "sqlite:sync" && event.id !== "sqlite:load_chunk" && event.id !== "sqlite:sync_complete")) return;
+    if (event.sourceEntity && event.sourceEntity.typeId === "minecraft:player") return;
     try {
       const payload = JSON.parse(event.message || "{}");
       if (event.id === "sqlite:sync_complete") {
@@ -191,6 +192,28 @@ function saveWarps(data) {
   globalThis.__sqlite_set_prop_v2__("warps_addon", "world", "warps_db", data);
 }
 
+function getDimensionSafe(dimensionId) {
+  if (!dimensionId) return world.getDimension("overworld");
+  if (typeof dimensionId !== "string") {
+    if (dimensionId.id) return dimensionId;
+    dimensionId = String(dimensionId);
+  }
+  const cleanId = dimensionId.replace(/^minecraft:/, "");
+  try {
+    return world.getDimension(dimensionId);
+  } catch (e1) {
+    try {
+      return world.getDimension(cleanId);
+    } catch (e2) {
+      try {
+        return world.getDimension("minecraft:" + cleanId);
+      } catch (e3) {
+        return world.getDimension("overworld");
+      }
+    }
+  }
+}
+
 // Comprobación de operador
 function isPlayerOp(player) {
   if (!player) return false;
@@ -291,6 +314,7 @@ function registerCustomCommands() {
       }, (origin, nombre) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         system.run(() => handleSetWarp(sender, String(nombre || "")));
         return commandOk("Procesando setwarp.");
       });
@@ -302,6 +326,7 @@ function registerCustomCommands() {
       }, (origin, nombre) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         system.run(() => handleSetWarp(sender, String(nombre || "")));
         return commandOk("Procesando setwarp.");
       });
@@ -313,6 +338,7 @@ function registerCustomCommands() {
       }, (origin, nombre) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         system.run(() => handleDelWarp(sender, String(nombre || "")));
         return commandOk("Procesando delwarp.");
       });
@@ -324,6 +350,7 @@ function registerCustomCommands() {
       }, (origin, nombre) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         system.run(() => handleDelWarp(sender, String(nombre || "")));
         return commandOk("Procesando delwarp.");
       });
@@ -337,6 +364,10 @@ registerCustomCommands();
 
 // Crear Warp (Solo OP)
 function handleSetWarp(player, warpName) {
+  if (!isPlayerOp(player)) {
+    player.sendMessage("§b§l[§3Warps§b§l]§r §cSolo los administradores pueden definir puntos de warp.");
+    return;
+  }
   if (!warpName) {
     player.sendMessage("§b§l[§3Warps§b§l]§r §cUso: /s:setwarp <nombre>");
     return;
@@ -367,6 +398,10 @@ function handleSetWarp(player, warpName) {
 
 // Eliminar Warp (Solo OP)
 function handleDelWarp(player, warpName) {
+  if (!isPlayerOp(player)) {
+    player.sendMessage("§b§l[§3Warps§b§l]§r §cSolo los administradores pueden eliminar puntos de warp.");
+    return;
+  }
   if (!warpName) {
     player.sendMessage("§b§l[§3Warps§b§l]§r §cUso: /s:delwarp <nombre>");
     return;
@@ -421,8 +456,10 @@ function openWarpsMenu(player) {
         
         system.runTimeout(() => {
           try {
+            if (!player || !player.isValid) return;
+            const targetDim = getDimensionSafe(warp.dimension);
             player.teleport({ x: warp.x, y: warp.y, z: warp.z }, {
-              dimension: world.getDimension(warp.dimension),
+              dimension: targetDim,
               rotation: warp.rotation
             });
             player.sendMessage(`§b§l[§3Warps§b§l]§r §aTeletransportado con éxito a §e${name.toUpperCase()}§a.`);
@@ -433,8 +470,10 @@ function openWarpsMenu(player) {
       } catch (err) { ErrorReporter.report(err, { addonId: "warps_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
         // Teletransporte directo sin fade si falla la cámara
         try {
+          if (!player || !player.isValid) return;
+          const targetDim = getDimensionSafe(warp.dimension);
           player.teleport({ x: warp.x, y: warp.y, z: warp.z }, {
-            dimension: world.getDimension(warp.dimension),
+            dimension: targetDim,
             rotation: warp.rotation
           });
           player.sendMessage(`§b§l[§3Warps§b§l]§r §aTeletransportado a §e${name.toUpperCase()}§a.`);

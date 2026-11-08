@@ -1,5 +1,5 @@
 import { ErrorReporter } from "./ErrorReporter.js";
-import { system } from "@minecraft/server";
+import { system, EquipmentSlot } from "@minecraft/server";
 import { Config } from "./Config.js";
 import { ExemptionManager } from "./ExemptionManager.js";
 import { PlayerStateManager } from "./PlayerStateManager.js";
@@ -54,7 +54,7 @@ export class MovementAnalyzer {
       try {
         const eq = player.getComponent("minecraft:equippable");
         if (eq) {
-          const chest = eq.getEquipment("Chest");
+          const chest = eq.getEquipment(EquipmentSlot?.Chest ?? "Chest");
           if (chest && chest.typeId === "minecraft:elytra" && !player.isOnGround) {
             isGliding = true;
           }

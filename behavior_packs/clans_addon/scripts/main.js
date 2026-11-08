@@ -76,6 +76,7 @@ try {
   if (!globalThis.__sqlite_listener_callback_v3__) {
     const callback = function(event) {
     if (!event || (event.id !== "sqlite:load" && event.id !== "sqlite:sync" && event.id !== "sqlite:load_chunk" && event.id !== "sqlite:sync_complete")) return;
+    if (event.sourceEntity && event.sourceEntity.typeId === "minecraft:player") return;
     try {
       const payload = JSON.parse(event.message || "{}");
       if (event.id === "sqlite:sync_complete") {
@@ -317,6 +318,7 @@ function adminDissolveClan(admin, key) {
 }
 
 function openAdminClanConfirm(admin, key) {
+  if (!isPlayerOp(admin)) return admin.sendMessage("§c[Clanes] No tienes permisos administrativos.");
   const clan = loadClansData()[key];
   if (!clan) return admin.sendMessage("§c[Clanes] Ese clan ya no existe.");
   pendingAdminClanDissolutions.set(String(admin.id), { key, expiresAt: Date.now() + 30_000 });
@@ -628,6 +630,45 @@ function escapeCommandArg(value) {
   return String(value || "").replace(/"/g, '\\"');
 }
 
+function getDamageSourcePlayer(damageSource) {
+  const direct = damageSource?.damagingEntity;
+  if (direct?.typeId === "minecraft:player") return direct;
+  try {
+    const projectile = damageSource?.damagingProjectile || direct;
+    const owner = projectile?.getComponent?.("minecraft:projectile")?.owner;
+    return owner?.typeId === "minecraft:player" ? owner : undefined;
+  } catch (error) {
+    return undefined;
+  }
+}
+
+function getDimensionSafe(dimensionId) {
+  if (!dimensionId) return world.getDimension("overworld");
+  if (typeof dimensionId !== "string") {
+    if (dimensionId.id) return dimensionId;
+    dimensionId = String(dimensionId);
+  }
+  const cleanId = dimensionId.replace(/^minecraft:/, "");
+  try {
+    return world.getDimension(dimensionId);
+  } catch (e1) {
+    try {
+      return world.getDimension(cleanId);
+    } catch (e2) {
+      try {
+        return world.getDimension("minecraft:" + cleanId);
+      } catch (e3) {
+        return world.getDimension("overworld");
+      }
+    }
+  }
+}
+
+function isSameDimension(dim1, dim2) {
+  if (!dim1 || !dim2) return false;
+  return String(dim1).replace(/^minecraft:/, "") === String(dim2).replace(/^minecraft:/, "");
+}
+
 function runTeleportFallback(player, destination, dimensionId) {
   if (!player || !destination || !dimensionId) return;
   const escapedName = escapeCommandArg(player.name);
@@ -764,14 +805,15 @@ function saveBountyTargetReturnLocation(player) {
 function teleportPlayerToSavedLocation(player, savedLocation) {
   if (!player || !savedLocation) return;
   try {
-    const dimension = world.getDimension(savedLocation.dimension);
+    const dimension = getDimensionSafe(savedLocation.dimension);
+    grantTemporaryTeleportExemption(player);
     player.teleport({ x: savedLocation.x, y: savedLocation.y, z: savedLocation.z }, { dimension });
   } catch (e) { ErrorReporter.report(e, { addonId: "clans_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
     runTeleportFallback(player, savedLocation, savedLocation.dimension);
   }
   system.runTimeout(() => {
     try {
-      if (player.dimension.id !== savedLocation.dimension || Math.abs(player.location.x - savedLocation.x) > 10) {
+      if (!isSameDimension(player.dimension?.id, savedLocation.dimension) || Math.abs(player.location.x - savedLocation.x) > 10) {
         runTeleportFallback(player, savedLocation, savedLocation.dimension);
       }
     } catch (err) { ErrorReporter.report(err, { addonId: "clans_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });}
@@ -1217,29 +1259,34 @@ const adminClanChat = world.beforeEvents?.chatSend || world.beforeEvents?.chat;
 if (adminClanChat?.subscribe) adminClanChat.subscribe((event) => {
   const raw = String(event.message ?? "").trim();
   const normalized = raw.toLowerCase();
-  if (normalized === "s:adminclanes") {
+  if (normalized === "s:adminclanes" || normalized.startsWith("s:adminclandisolver ") || normalized === "s:adminclanconfirmar") {
     if (event.cancel !== undefined) event.cancel = true;
-    system.run(() => openAdminClansMenu(event.sender));
-    return;
-  }
-  if (normalized.startsWith("s:adminclandisolver ")) {
-    if (event.cancel !== undefined) event.cancel = true;
-    const wanted = raw.slice("s:adminclandisolver".length).trim().replace(/^"|"$/g, "").toLowerCase();
-    system.run(() => {
-      const entry = Object.entries(loadClansData()).find(([key, clan]) => key.toLowerCase() === wanted || String(clan?.name ?? "").toLowerCase() === wanted);
-      if (!entry) return event.sender.sendMessage("§c[Clanes] Clan no encontrado.");
-      openAdminClanConfirm(event.sender, entry[0]);
-    });
-    return;
-  }
-  if (normalized === "s:adminclanconfirmar") {
-    if (event.cancel !== undefined) event.cancel = true;
-    system.run(() => {
-      const pending = pendingAdminClanDissolutions.get(String(event.sender.id));
-      pendingAdminClanDissolutions.delete(String(event.sender.id));
-      if (!pending || pending.expiresAt < Date.now()) return event.sender.sendMessage("§c[Clanes] No hay una disolución pendiente o la confirmación expiró.");
-      adminDissolveClan(event.sender, pending.key);
-    });
+    if (!isPlayerOp(event.sender)) {
+      system.run(() => event.sender.sendMessage("§c[Clanes] No tienes permisos administrativos."));
+      return;
+    }
+    if (normalized === "s:adminclanes") {
+      system.run(() => openAdminClansMenu(event.sender));
+      return;
+    }
+    if (normalized.startsWith("s:adminclandisolver ")) {
+      const wanted = raw.slice("s:adminclandisolver".length).trim().replace(/^"|"$/g, "").toLowerCase();
+      system.run(() => {
+        const entry = Object.entries(loadClansData()).find(([key, clan]) => key.toLowerCase() === wanted || String(clan?.name ?? "").toLowerCase() === wanted);
+        if (!entry) return event.sender.sendMessage("§c[Clanes] Clan no encontrado.");
+        openAdminClanConfirm(event.sender, entry[0]);
+      });
+      return;
+    }
+    if (normalized === "s:adminclanconfirmar") {
+      system.run(() => {
+        const pending = pendingAdminClanDissolutions.get(String(event.sender.id));
+        pendingAdminClanDissolutions.delete(String(event.sender.id));
+        if (!pending || pending.expiresAt < Date.now()) return event.sender.sendMessage("§c[Clanes] No hay una disolución pendiente o la confirmación expiró.");
+        adminDissolveClan(event.sender, pending.key);
+      });
+      return;
+    }
   }
 });
 
@@ -1981,7 +2028,7 @@ try {
   if (world.beforeEvents && world.beforeEvents.entityHurt && typeof world.beforeEvents.entityHurt.subscribe === "function") {
     world.beforeEvents.entityHurt.subscribe((event) => {
       const victim = event.hurtEntity;
-      const attacker = event.damageSource.damagingEntity;
+      const attacker = getDamageSourcePlayer(event.damageSource) || event.damageSource.damagingEntity;
       if (BOUNTY_ENABLED && victim?.typeId === "minecraft:player") {
         const victimProtected = isBountyWarmupActive(victim.name);
         const attackerProtected = attacker?.typeId === "minecraft:player" ? isBountyWarmupActive(attacker.name) : false;

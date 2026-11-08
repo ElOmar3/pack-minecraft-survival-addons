@@ -220,9 +220,16 @@ export class ModerationService {
     if (chat?.subscribe) chat.subscribe((event) => {
       const record = this.readRecord(event.sender, MUTE_PROPERTY);
       if (!record) return;
-      if (Number(record.expiresAt) <= Date.now()) { event.globalThis.__sqlite_set_prop_v2__("fcx_limited_admin", sender, MUTE_PROPERTY, undefined); return; }
+      if (Number(record.expiresAt) <= Date.now()) {
+        globalThis.__sqlite_set_prop_v2__("fcx_limited_admin", event.sender, MUTE_PROPERTY, undefined);
+        return;
+      }
       event.cancel = true;
-      event.sender.sendMessage(`§c[FCX Moderación] Silenciado. Motivo: ${sanitizeText(record.reason, 180)}`);
+      this.system.run(() => {
+        try {
+          event.sender.sendMessage(`§c[FCX Moderación] Silenciado. Motivo: ${sanitizeText(record.reason, 180)}`);
+        } catch {}
+      });
     });
     this.world.afterEvents.playerSpawn.subscribe((event) => {
       if (!event.initialSpawn) return;

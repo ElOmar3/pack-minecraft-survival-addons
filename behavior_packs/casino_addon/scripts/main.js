@@ -156,23 +156,32 @@ const PREFIX = "§b§l[§3Casino§b§l]§r";
 
 // Helper para abrir formularios de forma segura contra UserBusy (ej. chat cerrándose)
 function safeOpenForm(player, form, onSelect, onCancel = undefined, retryCount = 0) {
+  if (!player || (typeof player.isValid === "function" ? !player.isValid() : player.isValid === false)) {
+    if (onCancel) {
+      try { onCancel({ canceled: true, cancelationReason: "UserClosed" }); } catch (e) {}
+    }
+    return;
+  }
   form.show(player).then((response) => {
-    if (response.canceled) {
-      if (response.cancelationReason === "UserBusy" && retryCount < 5) {
+    if (!response || response.canceled) {
+      if (response && response.cancelationReason === "UserBusy" && retryCount < 5) {
         system.runTimeout(() => {
+          if (!player || (typeof player.isValid === "function" ? !player.isValid() : player.isValid === false)) return;
           safeOpenForm(player, form, onSelect, onCancel, retryCount + 1);
         }, 10);
         return;
       }
       if (onCancel) {
         system.run(() => {
-          onCancel(response);
+          try { onCancel(response || { canceled: true, cancelationReason: "UserClosed" }); } catch (e) {}
         });
       }
       return;
     }
     system.run(() => {
-      onSelect(response);
+      try { onSelect(response); } catch (e) {
+        ErrorReporter.report(e, { addonId: "casino_addon", moduleId: "main.js", operation: "safeOpenForm:onSelect", category: "runtime" });
+      }
     });
   }).catch((err) => {
     const message = String(err ?? "");
@@ -215,6 +224,12 @@ function endCasinoSession(player) {
   if (!player?.id) return;
   activeCasinoSessions.delete(player.id);
 }
+
+try {
+  world.afterEvents.playerLeave.subscribe((event) => {
+    if (event?.playerId) activeCasinoSessions.delete(event.playerId);
+  });
+} catch (e) {}
 
 function getUtcDay() {
   return Math.floor(Date.now() / 86400000);
@@ -526,6 +541,10 @@ function runSlotsSpin(player, bet) {
   const totalTicks = 8;
   
   function playTickSound() {
+    if (!player || (typeof player.isValid === "function" ? !player.isValid() : player.isValid === false)) {
+      endCasinoSession(player);
+      return;
+    }
     if (count < totalTicks) {
       // Tono ascendente
       const pitch = 0.5 + (count * 0.15);
@@ -729,6 +748,10 @@ function runRouletteSpin(player, bet, chosenColor) {
   const totalTicks = 12;
   
   function playWheelSound() {
+    if (!player || (typeof player.isValid === "function" ? !player.isValid() : player.isValid === false)) {
+      endCasinoSession(player);
+      return;
+    }
     if (count < totalTicks) {
       try {
         player.runCommand(`playsound random.click @s ~ ~ ~ 0.7 1.2`);

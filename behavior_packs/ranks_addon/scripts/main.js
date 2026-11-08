@@ -853,10 +853,14 @@ try {
           } catch (e) { ErrorReporter.report(e, { addonId: "ranks_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });}
 
           const formattedMessage = `${titlePrefix}${specialLabelPrefix}${clanPrefix}${rolePrefix}§7${sender.name}: §f${message}`;
-          world.sendMessage(formattedMessage);
-          try {
-            console.warn(`[CHAT] <${sender.name}> ${message}`);
-          } catch (e) { ErrorReporter.report(e, { addonId: "ranks_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });}
+          system.run(() => {
+            try {
+              world.sendMessage(formattedMessage);
+              console.warn(`[CHAT] <${sender.name}> ${message}`);
+            } catch (e) {
+              ErrorReporter.report(e, { addonId: "ranks_addon", moduleId: "main.js", operation: "broadcastChat", category: "runtime" });
+            }
+          });
         } catch (err) { ErrorReporter.report(err, { addonId: "ranks_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
           console.warn(`[Rangos] Error en formateador de chat: ${err}`);
         }

@@ -1,4 +1,4 @@
-import { world, system, CommandPermissionLevel, CustomCommandParamType, CustomCommandStatus, PlayerPermissionLevel, ItemStack, EnchantmentTypes } from "@minecraft/server";
+import { world, system, CommandPermissionLevel, CustomCommandParamType, CustomCommandStatus, PlayerPermissionLevel, ItemStack, EnchantmentTypes, EquipmentSlot } from "@minecraft/server";
 
 
 
@@ -479,7 +479,7 @@ try {
     if (!player || !isOp(player)) return;
 
     const equippable = player.getComponent("minecraft:equippable");
-    const item = equippable?.getEquipment("Mainhand");
+    const item = equippable?.getEquipment(EquipmentSlot?.Mainhand ?? "Mainhand");
     if (isAuditWand(item)) {
       event.cancel = true; // Evitar que se abra la interfaz de cofres, hornos, etc.
       const loc = isSneaking(player)
@@ -506,7 +506,7 @@ try {
     if (!player || player.typeId !== "minecraft:player" || !isOp(player)) return;
 
     const equippable = player.getComponent("minecraft:equippable");
-    const item = equippable?.getEquipment("Mainhand");
+    const item = equippable?.getEquipment(EquipmentSlot?.Mainhand ?? "Mainhand");
     if (isAuditWand(item)) {
       const loc = event.hitBlock.location;
       const found = historyAt(event.hitBlock.dimension.id, loc.x, loc.y, loc.z).slice(-8).reverse();

@@ -2579,27 +2579,44 @@ function commandError(message) {
   return { status: CustomCommandStatus.Failure, message };
 }
 
+function isAuctionSyncComplete() {
+  return Boolean(globalThis.__sqlite_sync_complete_v2__?.has("auction_house_addon"));
+}
+
 // Auxiliar robusto para abrir formularios evitando conflictos de pantallas
 function safeOpenForm(player, form, onSelect, onCancel = undefined, retryCount = 0) {
+  if (!player || (typeof player.isValid === "function" ? !player.isValid() : player.isValid === false)) {
+    if (onCancel) {
+      try { onCancel({ canceled: true, cancelationReason: "UserClosed" }); } catch (e) {}
+    }
+    return;
+  }
   form.show(player).then((response) => {
-    if (response.canceled) {
-      if (response.cancelationReason === "UserBusy" && retryCount < 5) {
+    if (!response || response.canceled) {
+      if (response && response.cancelationReason === "UserBusy" && retryCount < 5) {
         system.runTimeout(() => {
+          if (!player || (typeof player.isValid === "function" ? !player.isValid() : player.isValid === false)) return;
           safeOpenForm(player, form, onSelect, onCancel, retryCount + 1);
         }, 10);
         return;
       }
       if (onCancel) {
         system.run(() => {
-          onCancel(response);
+          try { onCancel(response || { canceled: true, cancelationReason: "UserClosed" }); } catch (e) {}
         });
       }
       return;
     }
     system.run(() => {
-      onSelect(response);
+      try { onSelect(response); } catch (e) {
+        ErrorReporter.report(e, { addonId: "auction_house_addon", moduleId: "main.js", operation: "safeOpenForm:onSelect", category: "runtime" });
+      }
     });
   }).catch((err) => {
+    const message = String(err ?? "");
+    if (message.includes("Player quit before responding") || message.includes("FormRejectError")) {
+      return;
+    }
     console.warn(`[Subastas] Error en safeOpenForm: ${err}`);
   });
 }
@@ -2609,7 +2626,7 @@ function loadSubastas() {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("auction_house_addon", "world", "subastas_db");
     if (!raw) {
-      subastasDataAvailable = true;
+      subastasDataAvailable = isAuctionSyncComplete();
       return [];
     }
     const parsed = JSON.parse(String(raw));
@@ -2661,23 +2678,28 @@ function depositAuctionTaxToBank(amount, type = "Comisión Subastas", actor = "S
     const reserve = Math.floor(amount * 0.10);
     const social = amount - (centralVault + construction + events + reserve);
 
-    const currentVault = Number(globalThis.__sqlite_get_prop_v2__("auction_house_addon", "world", "bank_vault_funds") ?? 0);
-    globalThis.__sqlite_set_prop_v2__("auction_house_addon", "world", "bank_vault_funds", currentVault + centralVault);
+    const currentVault = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_vault_funds") ?? 0);
+    globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_vault_funds", currentVault + centralVault);
 
-    const currentConst = Number(globalThis.__sqlite_get_prop_v2__("auction_house_addon", "world", "bank_fund_construction") ?? 0);
-    globalThis.__sqlite_set_prop_v2__("auction_house_addon", "world", "bank_fund_construction", currentConst + construction);
+    const currentConst = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_fund_construction") ?? 0);
+    globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_fund_construction", currentConst + construction);
 
-    const currentEv = Number(globalThis.__sqlite_get_prop_v2__("auction_house_addon", "world", "bank_fund_events") ?? 0);
-    globalThis.__sqlite_set_prop_v2__("auction_house_addon", "world", "bank_fund_events", currentEv + events);
+    const currentEv = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_fund_events") ?? 0);
+    globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_fund_events", currentEv + events);
 
-    const currentRes = Number(globalThis.__sqlite_get_prop_v2__("auction_house_addon", "world", "bank_fund_reserve") ?? 0);
-    globalThis.__sqlite_set_prop_v2__("auction_house_addon", "world", "bank_fund_reserve", currentRes + reserve);
+    const currentRes = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_fund_reserve") ?? 0);
+    globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_fund_reserve", currentRes + reserve);
 
-    const currentSoc = Number(globalThis.__sqlite_get_prop_v2__("auction_house_addon", "world", "bank_fund_social") ?? 0);
-    globalThis.__sqlite_set_prop_v2__("auction_house_addon", "world", "bank_fund_social", currentSoc + social);
+    const currentSoc = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_fund_social") ?? 0);
+    globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_fund_social", currentSoc + social);
 
     try {
-      const rawLedger = globalThis.__sqlite_get_prop_v2__("auction_house_addon", "world", "bank_public_ledger_v1");
+      const obj = world.scoreboard.getObjective("bank_vault");
+      if (obj) obj.setScore("bank_vault_funds", currentVault + centralVault);
+    } catch (e) {}
+
+    try {
+      const rawLedger = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_public_hacienda_ledger_v1") || globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_public_ledger_v1");
       let ledger = [];
       if (rawLedger) ledger = JSON.parse(rawLedger);
       ledger.unshift({
@@ -2688,7 +2710,9 @@ function depositAuctionTaxToBank(amount, type = "Comisión Subastas", actor = "S
         timestamp: Date.now()
       });
       if (ledger.length > 50) ledger = ledger.slice(0, 50);
-      globalThis.__sqlite_set_prop_v2__("auction_house_addon", "world", "bank_public_ledger_v1", JSON.stringify(ledger));
+      const ledgerJson = JSON.stringify(ledger);
+      globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_public_hacienda_ledger_v1", ledgerJson);
+      globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_public_ledger_v1", ledgerJson);
     } catch (e) {}
   } catch (e) {
     console.warn("[Subastas] Error depositando comisión bancaria: " + e);
@@ -3278,6 +3302,11 @@ function handleVenderCommand(player, precioStr) {
     return;
   }
 
+  if (!isAuctionSyncComplete() && !globalThis.__sqlite_get_prop_v2__("auction_house_addon", "world", "subastas_db")) {
+    player.sendMessage("§b§l[§3Subastas§b§l]§r §eEl sistema de subastas se está sincronizando con la base de datos tras la recarga del servidor. Por favor intenta de nuevo en unos momentos.");
+    return;
+  }
+
   try {
     const inventory = player.getComponent("minecraft:inventory").container;
     const selectedSlot = player.selectedSlotIndex;
@@ -3653,6 +3682,10 @@ function getAuctionItemDisplayName(list) {
 
 // Abrir menú visual
 function openSubastasMenu(player) {
+  if (!isAuctionSyncComplete() && !globalThis.__sqlite_get_prop_v2__("auction_house_addon", "world", "subastas_db")) {
+    player.sendMessage("§b§l[§3Subastas§b§l]§r §eEl sistema de subastas se está sincronizando con la base de datos tras la recarga del servidor. Por favor intenta de nuevo en unos momentos.");
+    return;
+  }
   const db = loadSubastas();
   if (expireAuctionListings(db)) saveSubastas(db);
   const form = new ActionFormData()

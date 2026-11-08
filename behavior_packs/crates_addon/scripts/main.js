@@ -497,7 +497,13 @@ function addMoney(player, amount) {
 }
 
 function addItemEnchantment(item, enchantmentId, level) {
-  const enchantmentType = EnchantmentTypes.get(enchantmentId);
+  let enchantmentType = EnchantmentTypes.get(enchantmentId);
+  if (!enchantmentType && !enchantmentId.startsWith("minecraft:")) {
+    enchantmentType = EnchantmentTypes.get(`minecraft:${enchantmentId}`);
+  }
+  if (!enchantmentType && enchantmentId.startsWith("minecraft:")) {
+    enchantmentType = EnchantmentTypes.get(enchantmentId.replace("minecraft:", ""));
+  }
   const enchantable = item.getComponent("minecraft:enchantable");
   if (!enchantmentType || !enchantable) {
     throw new Error(`Encantamiento no disponible: ${enchantmentId}`);
@@ -735,9 +741,8 @@ world.beforeEvents.playerInteractWithBlock.subscribe((event) => {
 
     try {
       if (selectedItem.amount > 1) {
-        const remaining = selectedItem.clone();
-        remaining.amount -= 1;
-        inv.setItem(keySlot, remaining);
+        selectedItem.amount -= 1;
+        inv.setItem(keySlot, selectedItem);
       } else {
         inv.setItem(keySlot, undefined);
       }

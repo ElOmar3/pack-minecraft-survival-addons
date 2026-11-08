@@ -34,7 +34,11 @@ export class ObservationService {
         const originalMode = String(actorPlayer.getGameMode?.() ?? "survival");
         const originalLocation = { x: actorPlayer.location.x, y: actorPlayer.location.y, z: actorPlayer.location.z };
         const originalDimension = actorPlayer.dimension;
-        actorPlayer.runCommand("gamemode spectator @s");
+        if (typeof actorPlayer.setGameMode === "function") {
+          try { actorPlayer.setGameMode("spectator"); } catch { actorPlayer.runCommand("gamemode spectator @s"); }
+        } else {
+          actorPlayer.runCommand("gamemode spectator @s");
+        }
         actorPlayer.teleport(targetPlayer.location, { dimension: targetPlayer.dimension });
         this.sessions.set(actor.principalId, { originalMode, originalLocation, originalDimension });
         return { spectating: target.playerNameSnapshot };
@@ -53,7 +57,11 @@ export class ObservationService {
       mutate: () => {
         const allowedModes = new Set(["survival","creative","adventure","spectator"]);
         const mode = allowedModes.has(session.originalMode) ? session.originalMode : "survival";
-        actorPlayer.runCommand(`gamemode ${mode} @s`);
+        if (typeof actorPlayer.setGameMode === "function") {
+          try { actorPlayer.setGameMode(mode); } catch { actorPlayer.runCommand(`gamemode ${mode} @s`); }
+        } else {
+          actorPlayer.runCommand(`gamemode ${mode} @s`);
+        }
         actorPlayer.teleport(session.originalLocation, { dimension: session.originalDimension });
         this.sessions.delete(actor.value.principalId);
         return { stopped: true };

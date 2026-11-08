@@ -289,10 +289,11 @@ export class InventoryAnalyzer {
       try {
         const eq = player.getComponent("minecraft:equippable");
         if (!eq) return null;
-        try { return eq.getEquipment(EquipmentSlot.Mainhand); } catch (_) { ErrorReporter.report(_, { addonId: "anticheat_addon", moduleId: "InventoryAnalyzer.js", operation: "try-catch", category: "runtime" });}
-        try { return eq.getEquipment(EquipmentSlot.Mainhand); } catch (_) { ErrorReporter.report(_, { addonId: "anticheat_addon", moduleId: "InventoryAnalyzer.js", operation: "try-catch", category: "runtime" });}
+        return eq.getEquipment(EquipmentSlot?.Mainhand ?? "Mainhand") || null;
+      } catch (e) {
+        ErrorReporter.report(e, { addonId: "anticheat_addon", moduleId: "InventoryAnalyzer.js", operation: "getEquipment", category: "runtime" });
         return null;
-      } catch (_) { ErrorReporter.report(_, { addonId: "anticheat_addon", moduleId: "InventoryAnalyzer.js", operation: "try-catch", category: "runtime" }); return null; }
+      }
     })();
     const heldItemTypeId = heldItem?.typeId || "";
 

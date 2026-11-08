@@ -555,7 +555,10 @@ if (pistonAfterEvent && typeof pistonAfterEvent.subscribe === "function") {
 
 world.afterEvents.playerBreakBlock.subscribe((event) => {
   const player = event.player;
-  const blockTypeId = event.brokenBlockPermutation.type.id;
+  const blockTypeId =
+    event.brokenBlockPermutation?.type?.id ||
+    event.brokenBlockPermutation?.typeId ||
+    event.block?.typeId;
   
   if (ORE_REWARDS[blockTypeId] !== undefined) {
     const wasPlayerPlaced = isPlayerPlacedOre(player.dimension.id, event.block.location);

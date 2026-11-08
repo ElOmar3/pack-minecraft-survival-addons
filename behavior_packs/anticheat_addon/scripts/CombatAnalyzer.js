@@ -444,8 +444,16 @@ export class CombatAnalyzer {
 
         // Mensaje discreto en actionbar para recordarles que están en combate
         try {
-          attacker.runCommand("title @s actionbar §c§l¡EN COMBATE! §7No te desconectes (10s)");
-          victim.runCommand("title @s actionbar §c§l¡EN COMBATE! §7No te desconectes (10s)");
+          if (attacker?.onScreenDisplay?.setActionBar) {
+            attacker.onScreenDisplay.setActionBar("§c§l¡EN COMBATE! §7No te desconectes (10s)");
+          } else {
+            attacker.runCommand("title @s actionbar §c§l¡EN COMBATE! §7No te desconectes (10s)");
+          }
+          if (victim?.onScreenDisplay?.setActionBar) {
+            victim.onScreenDisplay.setActionBar("§c§l¡EN COMBATE! §7No te desconectes (10s)");
+          } else {
+            victim.runCommand("title @s actionbar §c§l¡EN COMBATE! §7No te desconectes (10s)");
+          }
         } catch (e) { ErrorReporter.report(e, { addonId: "anticheat_addon", moduleId: "CombatAnalyzer.js", operation: "try-catch", category: "runtime" });}
       }
     } catch (e) { ErrorReporter.report(e, { addonId: "anticheat_addon", moduleId: "CombatAnalyzer.js", operation: "try-catch", category: "runtime" });}

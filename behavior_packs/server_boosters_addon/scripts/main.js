@@ -590,7 +590,11 @@ function getBoosterName(key) {
 // Los pagos de Fiebre tienen un tope persistente por jugador y activación.
 world.afterEvents.playerBreakBlock.subscribe((event) => {
   const player = event.player;
-  const blockType = event.brokenBlockPermutation.type.id;
+  const blockType =
+    event.brokenBlockPermutation?.type?.id ||
+    event.brokenBlockPermutation?.typeId ||
+    event.block?.typeId ||
+    "";
 
   if (globalBoosters.xp.active && receivesBooster(player, "xp")) {
     if (blockType.includes("ore")) {

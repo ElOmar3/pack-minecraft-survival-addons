@@ -1,5 +1,5 @@
 import { ErrorReporter } from "./ErrorReporter.js";
-import { CommandPermissionLevel, CustomCommandStatus, world, system } from "@minecraft/server";
+import { CommandPermissionLevel, CustomCommandStatus, PlayerPermissionLevel, world, system } from "@minecraft/server";
 
 
 
@@ -143,6 +143,22 @@ function commandError(message) {
   return { status: CustomCommandStatus.Failure, message };
 }
 
+function isPlayerOp(player) {
+  if (!player) return false;
+  try {
+    if (player.playerPermissionLevel === PlayerPermissionLevel.Operator) return true;
+  } catch (e) {}
+  try {
+    return !!(
+      player.isOp === true ||
+      (typeof player.isOp === "function" && player.isOp()) ||
+      player.hasTag?.("op") ||
+      player.hasTag?.("admin")
+    );
+  } catch (e) {}
+  return false;
+}
+
 // Mapa de jugadores en modo cámara: { playerName: { originalPosition, originalDimension, originalGamemode, timerId } }
 const activeSpectators = new Map();
 const CYCLE_TIME_SECS = 15; // Rotación cada 15 segundos
@@ -261,7 +277,7 @@ function registerCustomCommands() {
         register({ name: `${COMMAND_NAMESPACE}:${name}`, description: "Activa o desactiva la camara", permissionLevel: CommandPermissionLevel.Admin }, (origin) => {
           const sender = origin?.sourceEntity;
           if (!sender) return commandError("Solo para jugadores.");
-          if (!sender.isOp()) return commandError("Solo para administradores.");
+          if (!isPlayerOp(sender)) return commandError("Solo para administradores.");
           system.run(() => {
             if (activeSpectators.has(sender.name)) stopSpectating(sender);
             else startSpectating(sender);

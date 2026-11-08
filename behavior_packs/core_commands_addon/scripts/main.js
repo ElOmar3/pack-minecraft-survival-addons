@@ -83,6 +83,7 @@ try {
   if (!globalThis.__sqlite_listener_callback_v3__) {
     const callback = function(event) {
     if (!event || (event.id !== "sqlite:load" && event.id !== "sqlite:sync" && event.id !== "sqlite:load_chunk" && event.id !== "sqlite:sync_complete")) return;
+    if (event.sourceEntity && event.sourceEntity.typeId === "minecraft:player") return;
     try {
       const payload = JSON.parse(event.message || "{}");
       if (event.id === "sqlite:sync_complete") {
@@ -318,6 +319,25 @@ function registerCustomCommands() {
     try {
       register(
         {
+          name: `${COMMAND_NAMESPACE}:menu`,
+          description: "Abre el menú interactivo principal",
+          permissionLevel: CommandPermissionLevel.Any,
+        },
+        (origin) => {
+          const sender = origin?.sourceEntity;
+          if (!sender) return commandError("Este comando solo puede usarse por jugador.");
+          system.run(() => openMainMenu(sender));
+          return commandOk("Abriendo menú principal.");
+        }
+      );
+      console.warn(`[Core Commands] Registrado /${COMMAND_NAMESPACE}:menu`);
+    } catch (e) {
+      console.warn(`[Core Commands] Error registrando /${COMMAND_NAMESPACE}:menu: ` + e);
+    }
+
+    try {
+      register(
+        {
           name: `${COMMAND_NAMESPACE}:ping`,
           description: "Responde Pong",
           permissionLevel: CommandPermissionLevel.Any,
@@ -408,6 +428,10 @@ try {
       if (!message) return;
 
       console.warn("[Core Commands] scriptevent recibido: " + message);
+      if (message === "menu" || message === "mainmenu") {
+        system.run(() => openMainMenu(sender));
+        return;
+      }
       handleCommand(sender, message);
     });
   } else {
@@ -423,16 +447,17 @@ try {
 
 // Ejecuta comandos de forma segura en el jugador usando el método síncrono disponible en esta versión
 function runCommandSafe(player, cmd) {
+  const cleanedCmd = cmd.startsWith("/") ? cmd : "/" + cmd;
   try {
-    player.runCommand(cmd);
+    player.runCommand(cleanedCmd);
   } catch (e) {
     try {
-      player.runCommand("/" + cmd);
+      player.runCommand(cmd);
     } catch (e2) {
       // Fallback secundario a través de la dimensión del overworld
       try {
         const cleanedCmd = cmd.startsWith("/") ? cmd : "/" + cmd;
-        world.getDimension("overworld").runCommandAsync(`execute as "${player.name}" run ${cleanedCmd}`);
+        world.getDimension("overworld").runCommand(`execute as "${player.name}" run ${cleanedCmd}`);
       } catch (e3) {
         console.warn(`[Core UI] Fallaron todos los métodos para ejecutar comando "${cmd}": ${e3}`);
       }
@@ -567,9 +592,37 @@ function showSearchResults(player, query, matches) {
   }, undefined);
 }
 
-// 🧭 MENÚ PRINCIPAL (Direccionamiento directo)
+// 🧭 MENÚ PRINCIPAL
 function openMainMenu(player) {
-  openTravelMenu(player);
+  const isOp = isPlayerOp(player);
+  const form = new ActionFormData()
+    .title("§e🧭 MENÚ PRINCIPAL §r")
+    .body("§7Selecciona un servicio de la comunidad:")
+    .button("🚀 Movimiento y Viajes\n§8/s:home, /s:spawn, /s:rtp...")
+    .button("💰 Dinero y Economía\n§8/s:dinero, tienda, trabajos...")
+    .button("🤝 Comercio y Subastas\n§8/s:subastas, /s:trade...")
+    .button("🛡️ Terrenos y Protecciones\n§8/s:proteger, /s:zonas...")
+    .button("⚔️ Clanes y Coliseo\n§8/s:clan, duelos...")
+    .button("⚙️ Utilidades y Reglas\n§8/s:tumba, reglas, guías...")
+    .button("🔍 Buscar Comandos\n§8Buscador integrado");
+
+  if (isOp) {
+    form.button("👑 Panel de Administración\n§8Herramientas OP");
+  }
+  form.button("❌ Cerrar");
+
+  safeOpenForm(player, form, (response) => {
+    const idx = response.selection;
+    if (idx === undefined) return;
+    if (idx === 0) openTravelMenu(player);
+    else if (idx === 1) openMoneyMenu(player);
+    else if (idx === 2) openTradeMenu(player);
+    else if (idx === 3) openClaimMenu(player);
+    else if (idx === 4) openClansMenu(player);
+    else if (idx === 5) openUtilsMenu(player);
+    else if (idx === 6) openSearchForm(player);
+    else if (isOp && idx === 7) openAdminMenu(player);
+  }, undefined);
 }
 
 // 🚀 1. MOVIMIENTO Y VIAJE
@@ -867,6 +920,10 @@ function openUtilsMenu(player) {
 
 // 👑 7. ADMINISTRACIÓN
 function openAdminMenu(player) {
+  if (!isPlayerOp(player)) {
+    reply(player, "§cSolo los operadores tienen acceso al panel de administración.");
+    return;
+  }
   const form = new ActionFormData()
     .title("§e👑 PANEL DE ADMINISTRACIÓN 👑")
     .body("§7Herramientas rápidas para administradores.")

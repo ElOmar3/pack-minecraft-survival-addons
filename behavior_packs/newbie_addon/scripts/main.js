@@ -219,15 +219,18 @@ function handleRtp(player) {
     const returnToOrigin = (message) => {
       if (finished) return;
       finished = true;
+      if (!player || !player.isValid) return;
       try {
         player.teleport(origin.location, { dimension: origin.dimension });
       } catch (error) {
         ErrorReporter.report(error, { addonId: "newbie_addon", moduleId: "main.js", operation: "rtp-return-origin", category: "runtime" });
       }
-      player.runCommand("effect @s resistance 0");
-      player.runCommand("effect @s slow_falling 0");
-      player.runCommand("effect @s fire_resistance 0");
-      player.sendMessage(message);
+      try {
+        player.runCommand("effect @s resistance 0");
+        player.runCommand("effect @s slow_falling 0");
+        player.runCommand("effect @s fire_resistance 0");
+        player.sendMessage(message);
+      } catch (e) {}
     };
     
     try {
@@ -241,6 +244,10 @@ function handleRtp(player) {
       let attempts = 0;
       const checkInterval = system.runInterval(() => {
         attempts++;
+        if (!player || !player.isValid) {
+          system.clearRun(checkInterval);
+          return;
+        }
         try {
           const pos = player.location;
           const dimension = player.dimension;

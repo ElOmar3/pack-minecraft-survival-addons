@@ -233,7 +233,11 @@ function notifyBundleDisabled(player) {
 function makeBundleRemovable(item) {
   if (!item || !isBundleTypeId(item.typeId)) return undefined;
   const removable = typeof item.clone === "function" ? item.clone() : item;
-  removable.lockMode = ItemLockMode.none;
+  try {
+    removable.lockMode = ItemLockMode?.none ?? "none";
+  } catch (error) {
+    report(error, "setBundleLockMode");
+  }
   return removable;
 }
 

@@ -78,6 +78,7 @@ try {
   if (!globalThis.__sqlite_listener_callback_v3__) {
     const callback = function(event) {
     if (!event || (event.id !== "sqlite:load" && event.id !== "sqlite:sync" && event.id !== "sqlite:load_chunk" && event.id !== "sqlite:sync_complete")) return;
+    if (event.sourceEntity && event.sourceEntity.typeId === "minecraft:player") return;
     try {
       const payload = JSON.parse(event.message || "{}");
       if (event.id === "sqlite:sync_complete") {
@@ -219,9 +220,32 @@ function commandError(message) {
   return { status: CustomCommandStatus.Failure, message };
 }
 
-function runMenuCommand(player, primaryCommand, fallbackScriptEvent = undefined) {
+function getDimensionSafe(dimensionId) {
+  if (!dimensionId) return world.getDimension("overworld");
+  if (typeof dimensionId !== "string") {
+    if (dimensionId.id) return dimensionId;
+    dimensionId = String(dimensionId);
+  }
+  const cleanId = dimensionId.replace(/^minecraft:/, "");
   try {
-    player.runCommand(primaryCommand);
+    return world.getDimension(dimensionId);
+  } catch (e1) {
+    try {
+      return world.getDimension(cleanId);
+    } catch (e2) {
+      try {
+        return world.getDimension("minecraft:" + cleanId);
+      } catch (e3) {
+        return world.getDimension("overworld");
+      }
+    }
+  }
+}
+
+function runMenuCommand(player, primaryCommand, fallbackScriptEvent = undefined) {
+  const cmd = primaryCommand.startsWith("/") ? primaryCommand : "/" + primaryCommand;
+  try {
+    player.runCommand(cmd);
     return true;
   } catch (e) { ErrorReporter.report(e, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
     if (fallbackScriptEvent) {
@@ -435,6 +459,9 @@ function registerCustomCommands() {
         }, (origin, numero) => {
           const sender = origin?.sourceEntity;
           if (!sender) return commandError("Solo para jugadores.");
+          if ((name === "setspawn" || name === "estableceraparicion") && !isPlayerOp(sender)) {
+            return commandError("Solo para operadores.");
+          }
           let internalName = name;
           if (name === "casa") internalName = "home";
           if (name === "establecercasa") internalName = "sethome";
@@ -475,6 +502,7 @@ function registerCustomCommands() {
       }, (origin, jugador, motivo) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         const args = ["ban", String(jugador)];
         if (motivo !== undefined && motivo !== null && String(motivo).trim()) args.push(String(motivo));
         system.run(async () => {
@@ -495,6 +523,7 @@ function registerCustomCommands() {
       }, (origin, jugador, minutos, motivo) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         const args = ["tempban", String(jugador), String(minutos)];
         if (motivo !== undefined && motivo !== null && String(motivo).trim()) args.push(String(motivo));
         system.run(async () => {
@@ -511,6 +540,7 @@ function registerCustomCommands() {
       }, (origin, jugador) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         system.run(async () => {
           await handleCommand(sender, "unban", ["unban", String(jugador)]);
         });
@@ -529,6 +559,7 @@ function registerCustomCommands() {
       }, (origin, jugador, minutos, motivo) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         const args = ["mute", String(jugador), String(minutos)];
         if (motivo !== undefined && motivo !== null && String(motivo).trim()) args.push(String(motivo));
         system.run(async () => {
@@ -545,6 +576,7 @@ function registerCustomCommands() {
       }, (origin, jugador) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         system.run(async () => {
           await handleCommand(sender, "unmute", ["unmute", String(jugador)]);
         });
@@ -573,6 +605,7 @@ function registerCustomCommands() {
       }, (origin, radio) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         const args = ["removernpcs"];
         if (radio !== undefined && radio !== null) args.push(String(radio));
         system.run(async () => {
@@ -691,10 +724,12 @@ function announceConfirmedModeration(action, playerName, durationMinutes, reason
     : action === "temporary"
       ? `§8[§cModeración§8] §f${name} §7ha sido baneado temporalmente durante §e${duration} min§7. §8Motivo: §f${safeReason}`
       : `§8[§cModeración§8] §f${name} §7ha sido baneado permanentemente. §8Motivo: §f${safeReason}`;
-  const command = `tellraw @a ${JSON.stringify({ rawtext: [{ text }] })}`;
-  return world.getDimension("minecraft:overworld").runCommandAsync(command)
-    .then(() => console.warn(`[MODERATION_APPLIED] ${JSON.stringify({ action, name, durationMinutes: action === "permanent" ? 0 : duration, reason: safeReason })}`))
-    .catch((error) => ErrorReporter.report(error, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "moderation_announcement", category: "moderation" }));
+  try {
+    world.sendMessage(text);
+    console.warn(`[MODERATION_APPLIED] ${JSON.stringify({ action, name, durationMinutes: action === "permanent" ? 0 : duration, reason: safeReason })}`);
+  } catch (error) {
+    ErrorReporter.report(error, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "moderation_announcement", category: "moderation" });
+  }
 }
 
 function handleRelayModerationEvent(event) {
@@ -1128,12 +1163,13 @@ try {
       // El registro nativo de /s:home no puede cambiar sus parámetros durante
       // un reload de BDS. Esta ruta permite seleccionar las casas extra sin
       // reiniciar: /s:home 1 hasta /s:home 5.
-      const extraHomeMatch = message.match(/^\/?s:(?:home|casa)\s+([1-5])$/i);
+      const extraHomeMatch = message.match(/^\/?s:(home|casa|sethome|establecercasa)\s+([1-5])$/i);
       if (extraHomeMatch && sender) {
         if (event.cancel !== undefined) event.cancel = true;
-        const slot = extraHomeMatch[1];
+        const cmdKey = extraHomeMatch[1].toLowerCase().includes("set") ? "sethome" : "home";
+        const slot = extraHomeMatch[2];
         system.run(async () => {
-          await handleCommand(sender, "home", ["home", slot]);
+          await handleCommand(sender, cmdKey, [cmdKey, slot]);
         });
         return;
       }
@@ -1200,6 +1236,13 @@ async function handleCommand(player, command, args) {
     const loc = player.location;
     const dim = player.dimension.id;
 
+    if (typeof globalThis.isLocationProtectedFromPlayer === "function") {
+      if (globalThis.isLocationProtectedFromPlayer(player, loc, dim)) {
+        player.sendMessage("§b§l[§3Base§b§l]§r §cNo puedes establecer tu punto de Home dentro del terreno protegido de otro jugador o en el coliseo.");
+        return;
+      }
+    }
+
     if (requestedSlot === 1) {
       globalThis.__sqlite_set_prop_v2__("home_spawn_addon", player, "home_x", loc.x);
       globalThis.__sqlite_set_prop_v2__("home_spawn_addon", player, "home_y", loc.y);
@@ -1252,7 +1295,7 @@ async function handleCommand(player, command, args) {
       const extraHome = getSharedExtraHomeLocation(player, extraSlot);
       try {
         grantTemporaryTeleportExemption(player);
-        player.teleport({ x: extraHome.x, y: extraHome.y, z: extraHome.z }, { dimension: world.getDimension(extraHome.dimension) });
+        player.teleport({ x: extraHome.x, y: extraHome.y, z: extraHome.z }, { dimension: getDimensionSafe(extraHome.dimension) });
         player.sendMessage(`§b§l[§3Base§b§l]§r §aTeletransportado a Casa Extra #${requestedSlot}.`);
       } catch (error) { ErrorReporter.report(error, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "extraHomeTeleport", category: "runtime" });
         player.sendMessage("§b§l[§3Base§b§l]§r §cError al teletransportarse a esa casa.");
@@ -1271,7 +1314,7 @@ async function handleCommand(player, command, args) {
     }
     
     try {
-      const dim = world.getDimension(dimId);
+      const dim = getDimensionSafe(dimId);
       grantTemporaryTeleportExemption(player);
       player.teleport({ x, y, z }, { dimension: dim });
       player.sendMessage("§b§l[§3Base§b§l]§r §aTeletransportado a tu Home.");
@@ -1317,7 +1360,7 @@ async function handleCommand(player, command, args) {
     }
     
     try {
-      const dim = world.getDimension(dimId);
+      const dim = getDimensionSafe(dimId);
       grantTemporaryTeleportExemption(player);
       player.teleport({ x: x, y: y, z: z }, { dimension: dim });
       player.sendMessage("§b§l[§3Spawn§b§l]§r §aTeletransportado al Spawn principal.");
@@ -4305,7 +4348,7 @@ function removeTrackedGrave(graveId, reason = "expired") {
   if (!grave) return;
 
   try {
-    const dimension = world.getDimension(grave.dimensionId);
+    const dimension = getDimensionSafe(grave.dimensionId);
     if (dimension) {
       for (const pos of [grave.firstPos, grave.secondPos]) {
         const block = dimension.getBlock(pos);

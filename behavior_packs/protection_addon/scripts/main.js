@@ -77,6 +77,7 @@ try {
   if (!globalThis.__sqlite_listener_callback_v3__) {
     const callback = function(event) {
     if (!event || (event.id !== "sqlite:load" && event.id !== "sqlite:sync" && event.id !== "sqlite:load_chunk" && event.id !== "sqlite:sync_complete")) return;
+    if (event.sourceEntity && event.sourceEntity.typeId === "minecraft:player") return;
     try {
       const payload = JSON.parse(event.message || "{}");
       if (event.id === "sqlite:sync_complete") {
@@ -789,10 +790,15 @@ function hasZoneAccess(player, zone) {
   return Array.isArray(zone.trusted) && zone.trusted.some((entry) => normalizeZonePlayerName(entry) === playerName);
 }
 
+function matchDimension(dim1, dim2) {
+  if (!dim1 || !dim2) return false;
+  return String(dim1).replace(/^minecraft:/, "") === String(dim2).replace(/^minecraft:/, "");
+}
+
 // Comprobar si un punto está dentro de un cuboide
 function isInside(pos, dimId, zone) {
   if (zone?.disabled === true) return false;
-  if (dimId !== zone.dimension) return false;
+  if (!matchDimension(dimId, zone.dimension)) return false;
   const px = Math.floor(pos.x);
   const py = Math.floor(pos.y);
   const pz = Math.floor(pos.z);
@@ -820,6 +826,17 @@ function isInside(pos, dimId, zone) {
 function getZonesAt(pos, dimId) {
   const zones = loadZones();
   return zones.filter(z => isInside(pos, dimId, z));
+}
+
+globalThis.isLocationProtectedFromPlayer = function(player, loc, dimId) {
+  if (!player || !loc || !dimId) return false;
+  if (isPlayerOp(player)) return false;
+  const zones = getZonesAt(loc, dimId);
+  for (const zone of zones) {
+    if (isColiseumZone(zone)) return true;
+    if (isPrivateClaimZone(zone) && !hasPrivateZoneAccess(player, zone)) return true;
+  }
+  return false;
 }
 
 // Herramienta visual: un bloque de redstone renombrado a "limites" dibuja el
@@ -1001,7 +1018,7 @@ function renderBoundaryMarkers() {
 system.runInterval(renderBoundaryMarkers, BOUNDARY_RENDER_INTERVAL_TICKS);
 
 function isInsideAutomationArea(pos, dimId, parentZone, area) {
-  if (!pos || !parentZone || !area || parentZone.dimension !== dimId) return false;
+  if (!pos || !parentZone || !area || !matchDimension(parentZone.dimension, dimId)) return false;
   const x = Math.floor(Number(pos.x));
   const z = Math.floor(Number(pos.z));
   // La comunidad ya protege toda la altura. La subárea comparte ese modelo:
@@ -1095,7 +1112,7 @@ function isAdjacentToCommunitySupply(pos, dimId, zones = loadZones()) {
 }
 
 function isInsidePaidFarmArea(pos, dimId, parentZone, area) {
-  if (!pos || !area?.min || !area?.max || parentZone?.dimension !== dimId) return false;
+  if (!pos || !area?.min || !area?.max || !matchDimension(parentZone?.dimension, dimId)) return false;
   const x = Math.floor(Number(pos.x));
   const z = Math.floor(Number(pos.z));
 
@@ -2454,6 +2471,8 @@ function registerCustomCommands() {
         }, (origin) => {
           const sender = origin?.sourceEntity;
           if (!sender) return commandError("Solo para jugadores.");
+          const isAdminCmd = name === "adminpos1" || name === "adminpos2" || name === "adminc1" || name === "adminc2" || name === "coliseodebug" || name === "admincomunidad";
+          if (isAdminCmd && !isPlayerOp(sender)) return commandError("Solo para operadores.");
           system.run(() => {
             if (name === "pos1") handleSetPos(sender, 1);
             else if (name === "pos2") handleSetPos(sender, 2);
@@ -2490,6 +2509,7 @@ function registerCustomCommands() {
       }, (origin, nombre) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         system.run(() => handleClaim(sender, nombre === undefined ? "" : String(nombre), true));
         return commandOk("Procesando adminproteger.");
       });
@@ -2502,6 +2522,7 @@ function registerCustomCommands() {
       }, (origin, nombre) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         system.run(() => handleColiseumClaim(sender, nombre === undefined ? "" : String(nombre)));
         return commandOk("Procesando admincoliseo.");
       });
@@ -2514,6 +2535,7 @@ function registerCustomCommands() {
       }, (origin, nombre) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         system.run(() => handleAdminDelete(sender, nombre === undefined ? "" : String(nombre)));
         return commandOk("Procesando admineliminar.");
       });
@@ -2526,6 +2548,7 @@ function registerCustomCommands() {
       }, (origin, nombre) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         system.run(() => handleCreateAutomationArea(sender, String(nombre)));
         return commandOk("Procesando subárea comunitaria automatizada.");
       });
@@ -2538,6 +2561,7 @@ function registerCustomCommands() {
       }, (origin, nombre) => {
         const sender = origin?.sourceEntity;
         if (!sender) return commandError("Solo para jugadores.");
+        if (!isPlayerOp(sender)) return commandError("Solo para operadores.");
         system.run(() => handleColiseumClear(sender, nombre === undefined ? "" : String(nombre)));
         return commandOk("Procesando admincoliseolimpiar.");
       });
@@ -2875,7 +2899,7 @@ function handleClaim(player, name, isAdminClaim = false, isCommunityClaim = fals
   } else {
     player.sendMessage(`§b§l[§3Protección§b§l]§r §a¡Zona §e"${newZone.name}" §aprotegida correctamente por §6${formatClaimMoney(claimPrice)}§a!`);
   }
-  player.sendMessage(`§7Dimension: ${newZone.dimension.split(":")[1]} | Tamaño: ${sizeX}x${sizeZ} bloques.`);
+  player.sendMessage(`§7Dimension: ${String(newZone.dimension || "").replace(/^minecraft:/, "")} | Tamaño: ${sizeX}x${sizeZ} bloques.`);
 }
 
 function handleColiseumClaim(player, name) {
@@ -3996,7 +4020,7 @@ function handleSetPaidFarmEntry(player) {
 }
 
 function openSetPaidFarmLobbyDialog(player) {
-  const candidates = loadZones().flatMap((zone) => (zone?.dimension === player.dimension.id ? (zone.paidFarmAreas || []).map((area) => ({ zone, area })) : []));
+  const candidates = loadZones().flatMap((zone) => (matchDimension(zone?.dimension, player.dimension.id) ? (zone.paidFarmAreas || []).map((area) => ({ zone, area })) : []));
   if (!candidates.length) {
     player.sendMessage("§b§l[§dGranja§b§l]§r §cNo hay áreas pagadas en esta dimensión.");
     return;
@@ -4022,7 +4046,7 @@ function openRegisterPaidFarmButtonDialog(player) {
     player.sendMessage("§b§l[§dGranja§b§l]§r §cMira a un botón, a menos de 8 bloques.");
     return;
   }
-  const candidates = loadZones().flatMap((zone) => (zone?.dimension === block.dimension.id ? (zone.paidFarmAreas || []).map((area) => ({ zone, area })) : []));
+  const candidates = loadZones().flatMap((zone) => (matchDimension(zone?.dimension, block.dimension.id) ? (zone.paidFarmAreas || []).map((area) => ({ zone, area })) : []));
   if (!candidates.length) {
     player.sendMessage("§b§l[§dGranja§b§l]§r §cNo hay áreas pagadas en esta dimensión.");
     return;

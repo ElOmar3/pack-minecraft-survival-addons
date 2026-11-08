@@ -237,6 +237,19 @@ function buffMob(entity) {
   } catch (e) { ErrorReporter.report(e, { addonId: "blood_moon_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });}
 }
 
+function setDimensionWeather(dimension, weather) {
+  if (!dimension) return;
+  try {
+    if (typeof dimension.setWeather === "function") {
+      dimension.setWeather(weather === "thunder" ? "Thunder" : weather === "rain" ? "Rain" : "Clear");
+      return;
+    }
+  } catch (e) {}
+  try {
+    dimension.runCommand(`weather ${weather}`);
+  } catch (e) {}
+}
+
 function startBloodMoon() {
   if (isBloodMoonActive()) return;
   setBloodMoonActive(true);
@@ -258,9 +271,7 @@ function startBloodMoon() {
   }
   
   // Forzar tormenta para el ambiente de la Luna de Sangre
-  try {
-    overworld.runCommand("weather thunder");
-  } catch (e) {}
+  setDimensionWeather(overworld, "thunder");
   
   // Buffear a los monstruos que YA están vivos en el mundo
   for (const mobType of HOSTILE_MOBS) {
@@ -282,9 +293,7 @@ function endBloodMoon() {
   
   const overworld = world.getDimension("overworld");
   // Limpiar el clima de tormenta
-  try {
-    overworld.runCommand("weather clear");
-  } catch (e) {}
+  setDimensionWeather(overworld, "clear");
   
   // Quitar los bufos a los monstruos vivos
   for (const mobType of HOSTILE_MOBS) {
@@ -585,7 +594,7 @@ system.runInterval(() => {
       const overworld = world.getDimension("overworld");
       // Lluvia sin truenos naturales: la tormenta conserva su ambiente, pero
       // evita que el clima del juego genere rayos que puedan iniciar incendios.
-      overworld.runCommand("weather rain");
+      setDimensionWeather(overworld, "rain");
       for (const player of world.getAllPlayers()) {
         player.playSound("ambient.weather.thunder");
       }
@@ -601,9 +610,7 @@ system.runInterval(() => {
   if (superTempestTicks <= 0) {
     setSuperTempestActive(false);
     world.sendMessage("§e§l[Súper Tormenta] §aLa tormenta se disipa y los cielos se aclaran.");
-    try {
-      world.getDimension("overworld").runCommand("weather clear");
-    } catch(e) {}
+    setDimensionWeather(world.getDimension("overworld"), "clear");
     return;
   }
   
@@ -753,7 +760,9 @@ world.afterEvents.playerBreakBlock.subscribe((event) => {
     let checkCount = 0;
     const intervalId = system.runInterval(() => {
       checkCount++;
-      const alive = spawnedMobs.filter(m => m.isValid);
+      const alive = spawnedMobs.filter(m => {
+        try { return m && m.isValid; } catch { return false; }
+      });
       
       if (alive.length === 0) {
         system.clearRun(intervalId);
@@ -768,15 +777,20 @@ world.afterEvents.playerBreakBlock.subscribe((event) => {
             if (blockAt && (blockAt.typeId === "minecraft:air" || blockAt.typeId === "minecraft:tallgrass" || blockAt.typeId === "minecraft:water")) {
               blockAt.setType("minecraft:chest");
               
-              // Llenar cofre
-              const container = blockAt.getComponent("minecraft:inventory")?.container;
-              if (container) {
-                container.setItem(0, new ItemStack("minecraft:raw_iron", Math.floor(Math.random() * 8) + 4));
-                container.setItem(1, new ItemStack("minecraft:raw_gold", Math.floor(Math.random() * 4) + 2));
-                if (Math.random() < 0.3) {
-                  container.setItem(2, new ItemStack("minecraft:diamond", 1));
-                }
-              }
+              // Llenar cofre en el siguiente tick para garantizar la inicialización del contenedor
+              system.runTimeout(() => {
+                try {
+                  const freshBlock = dim.getBlock(spawnLoc);
+                  const container = freshBlock?.getComponent("minecraft:inventory")?.container;
+                  if (container) {
+                    container.setItem(0, new ItemStack("minecraft:raw_iron", Math.floor(Math.random() * 8) + 4));
+                    container.setItem(1, new ItemStack("minecraft:raw_gold", Math.floor(Math.random() * 4) + 2));
+                    if (Math.random() < 0.3) {
+                      container.setItem(2, new ItemStack("minecraft:diamond", 1));
+                    }
+                  }
+                } catch(e) {}
+              }, 1);
             }
           } catch(e) {}
         }
@@ -823,15 +837,20 @@ system.runInterval(() => {
     if (!chestBlock) return;
     
     chestBlock.setType("minecraft:chest");
-    const container = chestBlock.getComponent("minecraft:inventory")?.container;
-    if (!container) return;
-    
-    // Llenar cofre
-    container.setItem(0, new ItemStack("minecraft:diamond", Math.floor(Math.random() * 4) + 2));
-    container.setItem(4, new ItemStack("minecraft:emerald", Math.floor(Math.random() * 12) + 6));
-    if (Math.random() < 0.4) {
-      container.setItem(8, new ItemStack("minecraft:enchanted_golden_apple", 1));
-    }
+    system.runTimeout(() => {
+      try {
+        const freshBlock = dim.getBlock(chestLoc);
+        const container = freshBlock?.getComponent("minecraft:inventory")?.container;
+        if (!container) return;
+        
+        // Llenar cofre
+        container.setItem(0, new ItemStack("minecraft:diamond", Math.floor(Math.random() * 4) + 2));
+        container.setItem(4, new ItemStack("minecraft:emerald", Math.floor(Math.random() * 12) + 6));
+        if (Math.random() < 0.4) {
+          container.setItem(8, new ItemStack("minecraft:enchanted_golden_apple", 1));
+        }
+      } catch (e) {}
+    }, 1);
     
     // Invocar guardias
     for (let i = 0; i < 3; i++) {

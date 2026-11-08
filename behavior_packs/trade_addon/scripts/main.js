@@ -199,21 +199,38 @@ function setBalance(player, amount) {
 }
 
 function safeOpenForm(player, form, onSelect, onCancel = undefined, retryCount = 0) {
+  if (!player || (typeof player.isValid === "function" ? !player.isValid() : player.isValid === false)) {
+    if (onCancel) {
+      try { onCancel({ canceled: true, cancelationReason: "UserClosed" }); } catch (e) {}
+    }
+    return;
+  }
   form.show(player).then((response) => {
-    if (response.canceled) {
-      if (response.cancelationReason === "UserBusy" && retryCount < 5) {
+    if (!response || response.canceled) {
+      if (response && response.cancelationReason === "UserBusy" && retryCount < 5) {
         system.runTimeout(() => {
+          if (!player || (typeof player.isValid === "function" ? !player.isValid() : player.isValid === false)) return;
           safeOpenForm(player, form, onSelect, onCancel, retryCount + 1);
         }, 10);
         return;
       }
       if (onCancel) {
-        system.run(() => onCancel(response));
+        system.run(() => {
+          try { onCancel(response || { canceled: true, cancelationReason: "UserClosed" }); } catch (e) {}
+        });
       }
       return;
     }
-    system.run(() => onSelect(response));
+    system.run(() => {
+      try { onSelect(response); } catch (e) {
+        ErrorReporter.report(e, { addonId: "trade_addon", moduleId: "main.js", operation: "safeOpenForm:onSelect", category: "runtime" });
+      }
+    });
   }).catch((err) => {
+    const message = String(err ?? "");
+    if (message.includes("Player quit before responding") || message.includes("FormRejectError")) {
+      return;
+    }
     console.warn(`[Trade UI Addon] Error en formulario: ${err}`);
   });
 }

@@ -4,6 +4,7 @@ import {
   CustomCommandParamType,
   CustomCommandStatus,
   DisplaySlotId,
+  ItemStack,
   ObjectiveSortOrder,
   PlayerPermissionLevel,
   system,
@@ -145,15 +146,28 @@ system.runTimeout(() => {
 const patchShow = (prototype, originalShow) => {
   if (!prototype || !originalShow || originalShow.__isPatched) return;
   const patched = function(player, retryCount = 0) {
+    if (!player || (typeof player.isValid === "function" ? !player.isValid() : player.isValid === false)) {
+      return Promise.resolve({ canceled: true, cancelationReason: "UserClosed" });
+    }
     return originalShow.call(this, player).then((response) => {
-      if (response.canceled && response.cancelationReason === "UserBusy" && retryCount < 5) {
+      if (response && response.canceled && response.cancelationReason === "UserBusy" && retryCount < 5) {
         return new Promise((resolve) => {
           system.runTimeout(() => {
+            if (!player || (typeof player.isValid === "function" ? !player.isValid() : player.isValid === false)) {
+              resolve({ canceled: true, cancelationReason: "UserClosed" });
+              return;
+            }
             resolve(patched.call(this, player, retryCount + 1));
           }, 5);
         });
       }
-      return response;
+      return response || { canceled: true, cancelationReason: "UserClosed" };
+    }).catch((err) => {
+      const msg = String(err ?? "");
+      if (!msg.includes("Player quit before responding") && !msg.includes("FormRejectError")) {
+        console.warn(`[UI Form] Cierre o excepción en formulario: ${err}`);
+      }
+      return { canceled: true, cancelationReason: "UserClosed", error: err };
     });
   };
   patched.__isPatched = true;
@@ -422,11 +436,19 @@ function updateStockMarketIfDue(source = "interval") {
   return true;
 }
 
-// Inicializa solo si aún no hay mercado persistido. Después, actualiza cada cinco minutos.
-system.run(() => {
-  if (!globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_stocks_market_v1")) setStockMarketData(createDefaultStockMarket());
+// Inicializa solo tras la sincronización de SQLite si aún no hay mercado persistido.
+function initializeStockMarketAfterSync() {
+  const complete = Boolean(globalThis.__sqlite_sync_complete_v2__?.has("currency_addon"));
+  if (!complete) {
+    system.runTimeout(initializeStockMarketAfterSync, 20);
+    return;
+  }
+  if (!globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_stocks_market_v1")) {
+    setStockMarketData(createDefaultStockMarket());
+  }
   updateStockMarketIfDue("startup");
-});
+}
+system.runTimeout(initializeStockMarketAfterSync, 10);
 system.runInterval(() => updateStockMarketIfDue("interval"), STOCK_MARKET_CHECK_TICKS);
 
 function getPlayerPortfolio(player) {
@@ -443,7 +465,7 @@ function setPlayerPortfolio(player, portfolio) {
   } catch (e) {}
 }
 
-// Cheques al Portador (Feature 3)
+// Cheques al Portador (Feature 3) - Con verificación criptográfica de lore y sello de banco para evitar duplicaciones por yunque
 function redeemCheckFromInventory(player) {
   const inv = player.getComponent("minecraft:inventory")?.container;
   if (!inv) return false;
@@ -451,21 +473,31 @@ function redeemCheckFromInventory(player) {
   for (let i = 0; i < inv.size; i++) {
     const item = inv.getItem(i);
     if (item && item.typeId === "minecraft:paper" && item.nameTag && item.nameTag.includes("Cheque al Portador")) {
+      const lore = item.getLore() || [];
+      const hasBankSeal = lore.some(line => line.includes("Válido para cobro en el Banco General"));
+      if (!hasBankSeal) {
+        // Objeto falsificado o renombrado en un yunque sin el sello oficial del banco
+        continue;
+      }
       const match = item.nameTag.match(/\$(\d[\d,]*)/);
       if (match) {
         const val = parseInt(match[1].replace(/,/g, ""), 10);
-        if (val > 0) {
+        if (val > 0 && val <= MAX_TRANSACTION_AMOUNT) {
           if (item.amount > 1) {
             item.amount -= 1;
             inv.setItem(i, item);
           } else {
             inv.setItem(i, undefined);
           }
-          const handBal = getScore(player);
-          setScore(player, handBal + val, "check_redeem");
-          playBankSound(player, "income", `§a¡Cheque cobrado con éxito! Recibes $${val}.`);
-          logPlayerTransaction(player.name, "Cheque", val, "Cobro de cheque al portador");
-          return true;
+          if (addScore(player, val, "check_redeem")) {
+            playBankSound(player, "income", `§a¡Cheque cobrado con éxito! Recibes $${val}.`);
+            logPlayerTransaction(player.name, "Cheque", val, "Cobro de cheque al portador oficial");
+            return true;
+          } else {
+            // Revertir item si falló la acreditación
+            if (item.amount === 1) inv.setItem(i, item);
+            return false;
+          }
         }
       }
     }
@@ -1663,6 +1695,14 @@ world.afterEvents.playerSpawn.subscribe((event) => {
   const name = player.name;
   
   if (registry[name]) {
+    // Si hay transferencias o pagos acumulados mientras estuvo offline
+    if (registry[name].cash && Number(registry[name].cash) > 0) {
+      const pendingCash = Number(registry[name].cash);
+      delete registry[name].cash;
+      globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_accounts_registry_v2", JSON.stringify(registry));
+      addScore(player, pendingCash, "offline_transfer_claim");
+      player.sendMessage(`§b§l[§6Banco§b§l]§r §aHas recibido §e$${pendingCash}§a de pagos/transferencias acumuladas mientras estabas desconectado.`);
+    }
     // Si los datos globales difieren, resolver manteniendo el valor válido de ahorros
     const targetSavings = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_SAVINGS_PROPERTY) ?? 0);
     const targetLoan = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_LOAN_PROPERTY) ?? 0);
@@ -1897,16 +1937,20 @@ function openBankFixedDepositDialog(player) {
     form.show(player).then((res) => {
       if (res.canceled) return;
       if (res.selection === 0) {
+        const currentCd = getFixedDeposit(player);
+        if (!currentCd) {
+          playBankSound(player, "error", "§cNo tienes una inversión activa que cobrar.");
+          return;
+        }
+        setFixedDeposit(player, null);
         if (isMatured) {
-          setScore(player, handBal + totalPayout, "bank_cd_claim");
-          setFixedDeposit(player, null);
+          addScore(player, totalPayout, "bank_cd_claim");
           playBankSound(player, "upgrade", `§a¡Inversión cobrada! Recibes $${totalPayout}`);
-          logPlayerTransaction(player.name, "Plazo Fijo", totalPayout, `Cobro de inversión a ${cd.days} días`);
+          logPlayerTransaction(player.name, "Plazo Fijo", totalPayout, `Cobro de inversión a ${currentCd.days} días`);
         } else {
-          setScore(player, handBal + cd.amount, "bank_cd_cancel");
-          setFixedDeposit(player, null);
-          playBankSound(player, "error", `§cInversión cancelada. Se devolvió tu capital de $${cd.amount}.`);
-          logPlayerTransaction(player.name, "Plazo Fijo", cd.amount, "Cancelación anticipada");
+          addScore(player, currentCd.amount, "bank_cd_cancel");
+          playBankSound(player, "error", `§cInversión cancelada. Se devolvió tu capital de $${currentCd.amount}.`);
+          logPlayerTransaction(player.name, "Plazo Fijo", currentCd.amount, "Cancelación anticipada");
         }
       } else {
         openGeneralBankMenu(player);
@@ -1926,9 +1970,14 @@ function openBankFixedDepositDialog(player) {
       if (res.canceled) return;
       const amount = Math.floor(Number(res.formValues[0]) || 0);
       const planIdx = Number(res.formValues[1]) || 0;
+      const currentHandBal = getScore(player);
 
-      if (amount <= 0 || isNaN(amount) || amount > handBal) {
+      if (amount <= 0 || isNaN(amount) || amount > currentHandBal) {
         playBankSound(player, "error", "§cMonto de inversión inválido o saldo insuficiente.");
+        return;
+      }
+      if (getFixedDeposit(player)) {
+        playBankSound(player, "error", "§cYa tienes una inversión activa.");
         return;
       }
 
@@ -1940,7 +1989,7 @@ function openBankFixedDepositDialog(player) {
       const plan = plans[planIdx] || plans[0];
       const unlockAt = Date.now() + (plan.days * 24 * 60 * 60 * 1000);
 
-      if (setScore(player, handBal - amount, "bank_cd_create")) {
+      if (setScore(player, currentHandBal - amount, "bank_cd_create")) {
         setFixedDeposit(player, {
           amount,
           days: plan.days,
@@ -1990,16 +2039,19 @@ function openBankClanMenu(player) {
       modal.show(player).then((r) => {
         if (r.canceled) return;
         const val = Math.floor(Number(r.formValues[0]) || 0);
-        if (val <= 0 || isNaN(val) || val > handBal) {
-          playBankSound(player, "error", "§cMonto inválido.");
+        const currentHandBal = getScore(player);
+        if (val <= 0 || isNaN(val) || val > currentHandBal) {
+          playBankSound(player, "error", "§cMonto inválido o saldo insuficiente en mano.");
           return;
         }
-        if (setScore(player, handBal - val, "clan_deposit")) {
-          clanData.balance += val;
-          clanData.history.unshift({ timestamp: Date.now(), player: player.name, amount: val, type: "deposit" });
-          if (clanData.history.length > 5) clanData.history = clanData.history.slice(0, 5);
-          registry[clanName] = clanData;
-          setClanAccountRegistry(registry);
+        if (setScore(player, currentHandBal - val, "clan_deposit")) {
+          const freshRegistry = getClanAccountRegistry();
+          const targetClan = freshRegistry[clanName] || { balance: 0, history: [] };
+          targetClan.balance += val;
+          targetClan.history.unshift({ timestamp: Date.now(), player: player.name, amount: val, type: "deposit" });
+          if (targetClan.history.length > 5) targetClan.history = targetClan.history.slice(0, 5);
+          freshRegistry[clanName] = targetClan;
+          setClanAccountRegistry(freshRegistry);
           playBankSound(player, "deposit", `§aAportaste $${val} al fondo del clan ${clanName}.`);
         }
       }).catch(() => {});
@@ -2008,23 +2060,27 @@ function openBankClanMenu(player) {
         playBankSound(player, "error", "§cSolo los líderes del clan pueden retirar fondos.");
         return;
       }
+      const freshReg = getClanAccountRegistry();
+      const currentClanBal = (freshReg[clanName]?.balance) || 0;
       const modal = new ModalFormData()
         .title("📤 Retirar del Clan")
-        .textField(`Monto a retirar (Fondo disponible: $${clanData.balance}):`, "Monto");
+        .textField(`Monto a retirar (Fondo disponible: $${currentClanBal}):`, "Monto");
 
       modal.show(player).then((r) => {
         if (r.canceled) return;
         const val = Math.floor(Number(r.formValues[0]) || 0);
-        if (val <= 0 || isNaN(val) || val > clanData.balance) {
-          playBankSound(player, "error", "§cMonto inválido o fondos insuficientes.");
+        const freshRegistry = getClanAccountRegistry();
+        const targetClan = freshRegistry[clanName] || { balance: 0, history: [] };
+        if (val <= 0 || isNaN(val) || val > targetClan.balance) {
+          playBankSound(player, "error", "§cMonto inválido o fondos insuficientes en el clan.");
           return;
         }
-        if (setScore(player, handBal + val, "clan_withdraw")) {
-          clanData.balance -= val;
-          clanData.history.unshift({ timestamp: Date.now(), player: player.name, amount: val, type: "withdraw" });
-          if (clanData.history.length > 5) clanData.history = clanData.history.slice(0, 5);
-          registry[clanName] = clanData;
-          setClanAccountRegistry(registry);
+        if (addScore(player, val, "clan_withdraw")) {
+          targetClan.balance -= val;
+          targetClan.history.unshift({ timestamp: Date.now(), player: player.name, amount: val, type: "withdraw" });
+          if (targetClan.history.length > 5) targetClan.history = targetClan.history.slice(0, 5);
+          freshRegistry[clanName] = targetClan;
+          setClanAccountRegistry(freshRegistry);
           playBankSound(player, "withdraw", `§aRetiraste $${val} del fondo del clan ${clanName}.`);
         }
       }).catch(() => {});
@@ -2128,8 +2184,9 @@ function openBankStockMarketDialog(player) {
           }
 
           if (success) {
-            portfolio[sectorKey] = (portfolio[sectorKey] || 0) + qty;
-            setPlayerPortfolio(player, portfolio);
+            const freshPortfolio = getPlayerPortfolio(player);
+            freshPortfolio[sectorKey] = (freshPortfolio[sectorKey] || 0) + qty;
+            setPlayerPortfolio(player, freshPortfolio);
             playBankSound(player, "upgrade", `§aCompraste ${qty.toLocaleString()} acciones de ${market[sectorKey].name} por $${totalCost.toLocaleString()}.`);
             logPlayerTransaction(player.name, "Bolsa", totalCost, `Compra de ${qty} acc. (${sectorKey})`);
           } else {
@@ -2140,7 +2197,6 @@ function openBankStockMarketDialog(player) {
     } else if (res.selection === 1) {
       system.run(() => {
         if (!player || !player.isValid) return;
-        const currentHandBal = getScore(player);
         const modal = new ModalFormData()
           .title("💰 Vender Acciones")
           .dropdown("Selecciona el Sector:", [
@@ -2156,7 +2212,8 @@ function openBankStockMarketDialog(player) {
           const sectorKeys = ["mining", "farming", "building", "trade"];
           const sectorKey = sectorKeys[r.formValues[0]] || "mining";
           const qty = parseQuantityHelper(r.formValues[1]);
-          const currentOwned = portfolio[sectorKey] || 0;
+          const freshPortfolio = getPlayerPortfolio(player);
+          const currentOwned = freshPortfolio[sectorKey] || 0;
           const unitPrice = market[sectorKey].price;
           const totalEarnings = qty * unitPrice;
 
@@ -2170,12 +2227,15 @@ function openBankStockMarketDialog(player) {
             return;
           }
 
-          if (setScore(player, currentHandBal + totalEarnings, "sell_stocks")) {
-            portfolio[sectorKey] = currentOwned - qty;
-            setPlayerPortfolio(player, portfolio);
+          freshPortfolio[sectorKey] = currentOwned - qty;
+          setPlayerPortfolio(player, freshPortfolio);
+
+          if (addScore(player, totalEarnings, "sell_stocks")) {
             playBankSound(player, "income", `§aVendiste ${qty.toLocaleString()} acciones de ${market[sectorKey].name} por $${totalEarnings.toLocaleString()}.`);
             logPlayerTransaction(player.name, "Bolsa", totalEarnings, `Venta de ${qty} acc. (${sectorKey})`);
           } else {
+            freshPortfolio[sectorKey] = currentOwned;
+            setPlayerPortfolio(player, freshPortfolio);
             playBankSound(player, "error", "§cError al acreditación de venta de acciones.");
           }
         }).catch(() => {});
@@ -2823,6 +2883,7 @@ function openQuickTransferByCBUDialog(player) {
         } else {
           registry[targetAccount.name].cash = (registry[targetAccount.name].cash ?? 0) + recipientAmount;
         }
+        globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_accounts_registry_v2", JSON.stringify(registry));
       }
 
       logPlayerTransaction(player.name, "Transferencia CBU", amount, `Enviado a ${targetAccount.name} (${query})`);
@@ -3008,6 +3069,7 @@ function openInvoiceDetailDialog(player, invoiceId) {
           } else {
             registry[inv.senderName].cash = (registry[inv.senderName].cash ?? 0) + inv.amount;
           }
+          globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_accounts_registry_v2", JSON.stringify(registry));
         }
 
         logPlayerTransaction(player.name, "Pago Factura", inv.amount, `Pago a ${inv.senderName}: ${inv.concept}`);
@@ -3928,7 +3990,6 @@ function openAdminAdjustFundDialog(player) {
 // Diálogo: Depositar Ahorros
 function openBankDepositDialog(player) {
   const handBal = getScore(player);
-  const savings = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_SAVINGS_PROPERTY) ?? 0);
   
   const modal = new ModalFormData()
     .title("📥 Depositar Ahorros")
@@ -3941,14 +4002,16 @@ function openBankDepositDialog(player) {
       player.sendMessage("§b§l[§6Banco§b§l]§r §cMonto de depósito inválido.");
       return;
     }
-    if (handBal < val) {
+    const currentHandBal = getScore(player);
+    const currentSavings = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_SAVINGS_PROPERTY) ?? 0);
+    if (currentHandBal < val) {
       player.sendMessage("§b§l[§6Banco§b§l]§r §cNo tienes suficiente dinero en mano.");
       return;
     }
     
     // Deducción y depósito
-    if (setScore(player, handBal - val, "bank_deposit")) {
-      const nextSavings = savings + val;
+    if (setScore(player, currentHandBal - val, "bank_deposit")) {
+      const nextSavings = currentSavings + val;
       setPlayerBankDetails(player, nextSavings, Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_LOAN_PROPERTY) ?? 0));
       logPlayerTransaction(player.name, "Depósito", val, "Depósito manual en ahorros");
       // Iniciar el cooldown de intereses en este momento si era la primera vez
@@ -3979,7 +4042,6 @@ function openBankDepositDialog(player) {
 
 // Diálogo: Retirar Ahorros
 function openBankWithdrawDialog(player) {
-  const handBal = getScore(player);
   const savings = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_SAVINGS_PROPERTY) ?? 0);
   
   const modal = new ModalFormData()
@@ -3993,19 +4055,21 @@ function openBankWithdrawDialog(player) {
       player.sendMessage("§b§l[§6Banco§b§l]§r §cMonto de retiro inválido.");
       return;
     }
+    const currentHandBal = getScore(player);
+    const currentSavings = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_SAVINGS_PROPERTY) ?? 0);
     const vaultFunds = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_vault_funds") ?? 0);
     if (vaultFunds < val) {
       player.sendMessage(`§b§l[§6Banco§b§l]§r §cEl banco no dispone de suficiente liquidez en sus reservas en este momento para procesar tu retiro. Reservas del banco: §d$${vaultFunds}§c.`);
       return;
     }
-    if (savings < val) {
+    if (currentSavings < val) {
       player.sendMessage("§b§l[§6Banco§b§l]§r §cNo tienes suficientes ahorros para retirar ese monto.");
       return;
     }
     
     // Transacción
-    if (setScore(player, handBal + val, "bank_withdraw")) {
-      const nextSavings = savings - val;
+    if (setScore(player, currentHandBal + val, "bank_withdraw")) {
+      const nextSavings = currentSavings - val;
       setPlayerBankDetails(player, nextSavings, Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_LOAN_PROPERTY) ?? 0));
       logPlayerTransaction(player.name, "Retiro", val, "Retiro manual de ahorros");
       globalThis.__sqlite_set_prop_v2__("currency_addon", player, "bank_skip_repay_until", Date.now() + 3000); // 3 segundos de período de gracia
@@ -4226,14 +4290,20 @@ function openBankLoanPaybackDialog(player) {
       player.sendMessage("§b§l[§6Banco§b§l]§r §cMonto a pagar inválido.");
       return;
     }
-    if (handBal < val) {
+    const currentHandBal = getScore(player);
+    const currentLoan = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_LOAN_PROPERTY) ?? 0);
+    if (currentLoan <= 0) {
+      player.sendMessage("§b§l[§6Banco§b§l]§r §aNo tienes deudas activas que pagar.");
+      return;
+    }
+    if (currentHandBal < val) {
       player.sendMessage("§b§l[§6Banco§b§l]§r §cNo tienes suficiente dinero en mano.");
       return;
     }
 
-    const payment = Math.min(loan, val);
-    if (setScore(player, handBal - payment, "bank_loan_payback_manual")) {
-      const nextLoan = loan - payment;
+    const payment = Math.min(currentLoan, val);
+    if (setScore(player, currentHandBal - payment, "bank_loan_payback_manual")) {
+      const nextLoan = currentLoan - payment;
       const savings = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_SAVINGS_PROPERTY) ?? 0);
       setPlayerBankDetails(player, savings, nextLoan);
       releaseLoanTransferLock(player, payment, nextLoan);

@@ -136,15 +136,28 @@ system.runTimeout(() => {
 const patchShow = (prototype, originalShow) => {
   if (!prototype || !originalShow || originalShow.__isPatched) return;
   const patched = function(player, retryCount = 0) {
+    if (!player || (typeof player.isValid === "function" ? !player.isValid() : player.isValid === false)) {
+      return Promise.resolve({ canceled: true, cancelationReason: "UserClosed" });
+    }
     return originalShow.call(this, player).then((response) => {
-      if (response.canceled && response.cancelationReason === "UserBusy" && retryCount < 5) {
+      if (response && response.canceled && response.cancelationReason === "UserBusy" && retryCount < 5) {
         return new Promise((resolve) => {
           system.runTimeout(() => {
+            if (!player || (typeof player.isValid === "function" ? !player.isValid() : player.isValid === false)) {
+              resolve({ canceled: true, cancelationReason: "UserClosed" });
+              return;
+            }
             resolve(patched.call(this, player, retryCount + 1));
           }, 5);
         });
       }
-      return response;
+      return response || { canceled: true, cancelationReason: "UserClosed" };
+    }).catch((err) => {
+      const msg = String(err ?? "");
+      if (!msg.includes("Player quit before responding") && !msg.includes("FormRejectError")) {
+        console.warn(`[Shop UI Form] Cierre o excepción en formulario: ${err}`);
+      }
+      return { canceled: true, cancelationReason: "UserClosed", error: err };
     });
   };
   patched.__isPatched = true;
@@ -1149,7 +1162,7 @@ function readBalanceScore(player) {
 function logShopTransaction(playerName, type, amount, details) {
   try {
     let registry = {};
-    const raw = globalThis.__sqlite_get_prop_v2__("shop_addon", "world", "bank_accounts_registry_v2");
+    const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_accounts_registry_v2");
     if (raw) registry = JSON.parse(raw);
     
     if (!registry[playerName]) {
@@ -1171,7 +1184,7 @@ function logShopTransaction(playerName, type, amount, details) {
       registry[playerName].history = registry[playerName].history.slice(0, 5);
     }
     
-    globalThis.__sqlite_set_prop_v2__("shop_addon", "world", "bank_accounts_registry_v2", JSON.stringify(registry));
+    globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_accounts_registry_v2", JSON.stringify(registry));
   } catch (e) {}
 }
 
@@ -1215,13 +1228,24 @@ function changeBalance(player, delta) {
   const before = readBalanceScore(player);
   const after = before + normalizedDelta;
   if (after < 0) {
-    const isDebitEnabled = Boolean(globalThis.__sqlite_get_prop_v2__("shop_addon", player, "bank_debit_card_enabled_v1") ?? true);
+    const isDebitEnabled = Boolean(globalThis.__sqlite_get_prop_v2__("currency_addon", player, "bank_debit_card_enabled_v1") ?? true);
     if (isDebitEnabled && normalizedDelta < 0) {
       const cost = Math.abs(normalizedDelta);
-      const savings = Number(globalThis.__sqlite_get_prop_v2__("shop_addon", player, "bank_savings_v1") ?? 0);
+      const savings = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, "bank_savings_v1") ?? 0);
       if (savings >= cost) {
         const nextSavings = savings - cost;
-        globalThis.__sqlite_set_prop_v2__("shop_addon", player, "bank_savings_v1", nextSavings);
+        globalThis.__sqlite_set_prop_v2__("currency_addon", player, "bank_savings_v1", nextSavings);
+        try {
+          const rawReg = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_accounts_registry_v2");
+          if (rawReg) {
+            const reg = JSON.parse(rawReg);
+            if (reg[player.name]) {
+              reg[player.name].savings = nextSavings;
+              reg[player.name].lastUpdate = Date.now();
+              globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_accounts_registry_v2", JSON.stringify(reg));
+            }
+          }
+        } catch (e) {}
         try {
           player.playSound("random.pop", { pitch: 1.2, volume: 0.8 });
           player.onScreenDisplay.setActionBar(`§a💳 Pagado $${cost} con Tarjeta de Débito (Ahorros: $${nextSavings})`);
@@ -1498,7 +1522,7 @@ function tryGiveEnchantedBook(player, enchantId, price, level = 1) {
     return;
   }
 
-  const buyTaxRate = Number(globalThis.__sqlite_get_prop_v2__("shop_addon", "world", "tax_shop_buy_rate_v1") ?? 5);
+  const buyTaxRate = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "tax_shop_buy_rate_v1") ?? 5);
   const taxAmount = Math.ceil(price * (buyTaxRate / 100));
   const finalPrice = price + taxAmount;
 
@@ -1510,8 +1534,8 @@ function tryGiveEnchantedBook(player, enchantId, price, level = 1) {
   }
 
   try {
-    const currentVault = Number(globalThis.__sqlite_get_prop_v2__("shop_addon", "world", "bank_vault_funds") ?? 0);
-    globalThis.__sqlite_set_prop_v2__("shop_addon", "world", "bank_vault_funds", currentVault + Math.ceil(finalPrice));
+    const currentVault = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_vault_funds") ?? 0);
+    globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_vault_funds", currentVault + Math.ceil(finalPrice));
   } catch (e) {
     console.warn("[Shop Addon] Error actualizando bank_vault_funds en compra de libro: " + e);
   }
@@ -1534,8 +1558,8 @@ function tryGiveEnchantedBook(player, enchantId, price, level = 1) {
     if (!refund.ok) console.warn(`[ECONOMY_CRITICAL] No se pudo reembolsar el libro encantado a ${player.name}.`);
     else {
       try {
-        const currentVault = Number(globalThis.__sqlite_get_prop_v2__("shop_addon", "world", "bank_vault_funds") ?? 0);
-        globalThis.__sqlite_set_prop_v2__("shop_addon", "world", "bank_vault_funds", Math.max(0, currentVault - Math.ceil(finalPrice)));
+        const currentVault = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_vault_funds") ?? 0);
+        globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_vault_funds", Math.max(0, currentVault - Math.ceil(finalPrice)));
       } catch (e) {
         console.warn("[Shop Addon] Error devolviendo bank_vault_funds en compra de libro: " + e);
       }
@@ -1591,24 +1615,33 @@ try {
 // Vistas de Formularios UI
 // Auxiliar robusto para abrir formularios evitando conflictos de pantallas (ej. Chat cerrándose)
 function safeOpenForm(player, form, onSelect, onCancel = undefined, retryCount = 0) {
+  if (!player || (typeof player.isValid === "function" ? !player.isValid() : player.isValid === false)) {
+    if (onCancel) {
+      try { onCancel({ canceled: true, cancelationReason: "UserClosed" }); } catch (e) {}
+    }
+    return;
+  }
   form.show(player).then((response) => {
-    if (response.canceled) {
+    if (!response || response.canceled) {
       // Si se cancela por estar el usuario ocupado (ej. cerrando chat), reintentamos en unos ticks
-      if (response.cancelationReason === "UserBusy" && retryCount < 5) {
+      if (response && response.cancelationReason === "UserBusy" && retryCount < 5) {
         system.runTimeout(() => {
+          if (!player || (typeof player.isValid === "function" ? !player.isValid() : player.isValid === false)) return;
           safeOpenForm(player, form, onSelect, onCancel, retryCount + 1);
         }, 10);
         return;
       }
       if (onCancel) {
         system.run(() => {
-          onCancel(response);
+          try { onCancel(response || { canceled: true, cancelationReason: "UserClosed" }); } catch (e) {}
         });
       }
       return;
     }
     system.run(() => {
-      onSelect(response);
+      try { onSelect(response); } catch (e) {
+        ErrorReporter.report(e, { addonId: "shop_addon", moduleId: "main.js", operation: "safeOpenForm:onSelect", category: "runtime" });
+      }
     });
   }).catch((err) => {
     const message = String(err ?? "");
@@ -1952,7 +1985,7 @@ function openPurchaseQuantity(player, item, catIdx) {
     }
     
     const cost = unitPrice * qty;
-    const configuredBuyTaxRate = Math.floor(Number(globalThis.__sqlite_get_prop_v2__("shop_addon", "world", "tax_shop_buy_rate_v1") ?? 5));
+    const configuredBuyTaxRate = Math.floor(Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "tax_shop_buy_rate_v1") ?? 5));
     const buyTaxRate = Number.isSafeInteger(configuredBuyTaxRate) && configuredBuyTaxRate >= 0 && configuredBuyTaxRate <= 100
       ? configuredBuyTaxRate
       : 5;
@@ -1976,8 +2009,8 @@ function openPurchaseQuantity(player, item, catIdx) {
     }
 
     try {
-      const currentVault = Number(globalThis.__sqlite_get_prop_v2__("shop_addon", "world", "bank_vault_funds") ?? 0);
-      globalThis.__sqlite_set_prop_v2__("shop_addon", "world", "bank_vault_funds", currentVault + Math.ceil(finalCost));
+      const currentVault = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_vault_funds") ?? 0);
+      globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_vault_funds", currentVault + Math.ceil(finalCost));
       console.warn("[Shop Addon] bank_vault_funds actualizado: " + (currentVault + Math.ceil(finalCost)));
     } catch (e) {
       console.warn("[Shop Addon] Error actualizando bank_vault_funds en compra de item: " + e);
@@ -1989,8 +2022,8 @@ function openPurchaseQuantity(player, item, catIdx) {
       if (!refund.ok) console.warn(`[ECONOMY_CRITICAL] No se pudo reembolsar una compra fallida a ${player.name}.`);
       else {
         try {
-          const currentVault = Number(globalThis.__sqlite_get_prop_v2__("shop_addon", "world", "bank_vault_funds") ?? 0);
-          globalThis.__sqlite_set_prop_v2__("shop_addon", "world", "bank_vault_funds", Math.max(0, currentVault - Math.ceil(finalCost)));
+          const currentVault = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_vault_funds") ?? 0);
+          globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_vault_funds", Math.max(0, currentVault - Math.ceil(finalCost)));
           console.warn("[Shop Addon] bank_vault_funds revertido: " + Math.max(0, currentVault - Math.ceil(finalCost)));
         } catch (e) {
           console.warn("[Shop Addon] Error devolviendo bank_vault_funds en compra de item: " + e);
@@ -2364,7 +2397,7 @@ function openSellQuantity(player, item, qtyInInventory) {
       return;
     }
 
-    const sellTaxRate = Number(globalThis.__sqlite_get_prop_v2__("shop_addon", "world", "tax_shop_sell_rate_v1") ?? 5);
+    const sellTaxRate = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "tax_shop_sell_rate_v1") ?? 5);
     const taxAmount = Math.floor(totalEarnings * (sellTaxRate / 100));
     const netEarnings = totalEarnings - taxAmount;
 
@@ -2378,8 +2411,8 @@ function openSellQuantity(player, item, qtyInInventory) {
 
     if (taxAmount > 0) {
       try {
-        const currentVault = Number(globalThis.__sqlite_get_prop_v2__("shop_addon", "world", "bank_vault_funds") ?? 0);
-        globalThis.__sqlite_set_prop_v2__("shop_addon", "world", "bank_vault_funds", currentVault + taxAmount);
+        const currentVault = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_vault_funds") ?? 0);
+        globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_vault_funds", currentVault + taxAmount);
       } catch (e) {
         console.warn("[Shop Addon] Error actualizando bank_vault_funds en retencion de venta: " + e);
       }

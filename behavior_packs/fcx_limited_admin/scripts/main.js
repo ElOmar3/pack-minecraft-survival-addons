@@ -135,12 +135,19 @@ system.runTimeout(() => {
 const bootstrap = new AdminBootstrap();
 bootstrap.registerCommands();
 
+let syncAttempts = 0;
+const MAX_SYNC_WAIT_ATTEMPTS = 10; // ~10 segundos (200 ticks)
+
 function initializeAfterSqliteSync() {
   try {
+    syncAttempts++;
     const complete = globalThis.__sqlite_sync_complete_v2__;
-    if (!complete || !complete.has("fcx_limited_admin")) {
+    if ((!complete || !complete.has("fcx_limited_admin")) && syncAttempts < MAX_SYNC_WAIT_ATTEMPTS) {
       system.runTimeout(initializeAfterSqliteSync, 20);
       return;
+    }
+    if (!complete || !complete.has("fcx_limited_admin")) {
+      console.warn(`[FCX_ADMIN] SQLite sync timeout reached (${syncAttempts} attempts). Procediendo con inicialización de respaldo.`);
     }
     bootstrap.initialize();
   } catch (error) {

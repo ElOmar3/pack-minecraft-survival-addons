@@ -312,7 +312,7 @@ function isPlayerOp(player) {
   if (!player) return false;
   try {
     if (player.playerPermissionLevel === PlayerPermissionLevel.Operator) return true;
-  } catch (e) { ErrorReporter.report(e, { addonId: "jobs_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });}
+  } catch (e) {}
   try {
     if (typeof player.hasTag === "function") {
       if (
@@ -330,7 +330,7 @@ function isPlayerOp(player) {
         return true;
       }
     }
-  } catch (e) { ErrorReporter.report(e, { addonId: "jobs_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });}
+  } catch (e) {}
 
   try {
     const permission = String(player.permission ?? player.commandPermissionLevel ?? "").toLowerCase();

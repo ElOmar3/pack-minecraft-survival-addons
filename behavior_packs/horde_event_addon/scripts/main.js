@@ -1791,7 +1791,8 @@ world.afterEvents.playerSpawn.subscribe((event) => {
 // 5. Monitorizar los monstruos
 system.runInterval(() => {
   if (!activeHorde.active) return;
-  const info = getSpawnLocation();
+  const info = getLoadedSpawnLocation();
+  if (!info) return;
   const mobs = info.dimension.getEntities({ tags: ["horde_mob"] });
   if (mobs.length === 0) {
     if (activeHorde.wave < 3) {
@@ -1807,7 +1808,8 @@ system.runInterval(() => {
 
 system.runInterval(() => {
   if (!activeApocalypse.active) return;
-  const info = getSpawnLocation();
+  const info = getLoadedSpawnLocation();
+  if (!info) return;
   const zombies = info.dimension.getEntities({ tags: [APOCALYPSE_MOB_TAG] });
   if (zombies.length !== 0) return;
   if (activeApocalypse.wave < APOCALYPSE_WAVE_SIZES.length) {

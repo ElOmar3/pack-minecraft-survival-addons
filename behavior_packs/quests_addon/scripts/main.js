@@ -558,11 +558,11 @@ function safeOpenForm(player, form, onSelect, onCancel = undefined, retryCount =
         return;
       }
       if (onCancel) {
-        onCancel(response);
+        system.run(() => onCancel(response));
       }
       return;
     }
-    onSelect(response);
+    system.run(() => onSelect(response));
   }).catch((err) => {
     console.warn(`[Quests Addon] Error en safeOpenForm: ${err}`);
   });

@@ -160,7 +160,7 @@ const MAX_GROUND_ITEMS_PER_CELL = 100;
 
 const HOSTILE_MOBS = new Set([
   "minecraft:blaze", "minecraft:bogged", "minecraft:breeze", "minecraft:cave_spider",
-  "minecraft:creeper", "minecraft:drowned", "minecraft:elder_guardian", "minecraft:endermite",
+  "minecraft:creaking", "minecraft:creeper", "minecraft:drowned", "minecraft:elder_guardian", "minecraft:endermite",
   "minecraft:enderman", "minecraft:evoker", "minecraft:ghast", "minecraft:guardian",
   "minecraft:hoglin", "minecraft:husk", "minecraft:magma_cube", "minecraft:phantom",
   "minecraft:piglin", "minecraft:piglin_brute", "minecraft:pillager", "minecraft:ravager",
@@ -181,7 +181,8 @@ const PASSIVE_MOBS = new Set([
 
 function isShulkerBoxItemEntity(entity) {
   try {
-    const typeId = String(entity?.getComponent?.("minecraft:item")?.itemStack?.typeId || "").toLowerCase();
+    const itemComp = entity?.getComponent?.("minecraft:item") || entity?.getComponent?.("item");
+    const typeId = String(itemComp?.itemStack?.typeId || "").toLowerCase();
     return typeId === "minecraft:shulker_box" || /^minecraft:[a-z_]+_shulker_box$/.test(typeId);
   } catch (error) {
     ErrorReporter.report(error, { addonId: "lag_cleaner_addon", moduleId: "main.js", operation: "inspectGroundItem", category: "runtime" });
@@ -193,7 +194,10 @@ function isProtectedEntity(entity) {
   try {
     if (String(entity?.nameTag || "").trim()) return true;
     const tameable = entity?.getComponent?.("minecraft:tameable");
-    return tameable?.isTamed === true;
+    if (tameable?.isTamed === true) return true;
+    const leashable = entity?.getComponent?.("minecraft:leashable");
+    if (leashable?.isLeashed === true) return true;
+    return false;
   } catch (error) {
     ErrorReporter.report(error, { addonId: "lag_cleaner_addon", moduleId: "main.js", operation: "inspectProtectedEntity", category: "runtime" });
     return true;
@@ -306,19 +310,24 @@ function registerCustomCommands() {
 registerCustomCommands();
 
 function scheduleCleanup(delaySeconds) {
-  system.runTimeout(() => {
-    world.sendMessage("§b§l[§3Limpieza§b§l]§r §7Limpieza de suelo en §e60 segundos§7.");
-  }, (delaySeconds - 60) * 20);
+  if (delaySeconds > 60) {
+    system.runTimeout(() => {
+      world.sendMessage("§b§l[§3Limpieza§b§l]§r §7Limpieza de suelo en §e60 segundos§7.");
+    }, (delaySeconds - 60) * 20);
+  }
 
-  system.runTimeout(() => {
-    world.sendMessage("§b§l[§3Limpieza§b§l]§r §7Limpieza de suelo en §c10 segundos§7.");
-  }, (delaySeconds - 10) * 20);
+  if (delaySeconds > 10) {
+    system.runTimeout(() => {
+      world.sendMessage("§b§l[§3Limpieza§b§l]§r §7Limpieza de suelo en §c10 segundos§7.");
+    }, (delaySeconds - 10) * 20);
+  }
 
+  const cleanDelayTicks = Math.max(20, Math.floor(delaySeconds * 20));
   system.runTimeout(() => {
     const cleared = cleanGroundItems();
     world.sendMessage(`§b§l[§3Limpieza§b§l]§r §7Limpieza completada. Se eliminaron §e${cleared} §7objetos del suelo.`);
     scheduleCleanup(CLEAN_INTERVAL_SECS);
-  }, delaySeconds * 20);
+  }, cleanDelayTicks);
 }
 
 scheduleCleanup(INITIAL_CLEAN_DELAY_SECS);
