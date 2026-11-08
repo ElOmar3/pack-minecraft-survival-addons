@@ -1,0 +1,27 @@
+{
+  "name": "pacifico-bds-sqlite-bridge",
+  "version": "3.0.0",
+  "description": "Puente de persistencia SQLite de alto rendimiento y anti-corrupción para Minecraft Bedrock Dedicated Server",
+  "main": "sqlite-daemon.js",
+  "scripts": {
+    "start": "node sqlite-daemon.js",
+    "test": "node test-bridge.js"
+  },
+  "keywords": [
+    "minecraft",
+    "bedrock",
+    "bds",
+    "sqlite",
+    "addons",
+    "script-api",
+    "anti-corruption"
+  ],
+  "author": "Pacífico Comunitario Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.0.0"
+  }
+}

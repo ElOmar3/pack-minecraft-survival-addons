@@ -92,6 +92,19 @@ if [[ -d "$SCRIPT_DIR/tools" ]]; then
     cp -r "$SCRIPT_DIR/tools/"* "$TARGET_BDS/tools/"
 fi
 
+# Copiar demonio y puente SQLite
+if [[ -d "$SCRIPT_DIR/bridge" ]]; then
+    echo "-> Instalando sistema de persistencia SQLite V3..."
+    mkdir -p "$TARGET_BDS/bridge"
+    cp -r "$SCRIPT_DIR/bridge/"* "$TARGET_BDS/bridge/"
+fi
+
+# Copiar scripts de arranque con persistencia
+if [[ -f "$SCRIPT_DIR/start-server.sh" ]]; then
+    cp "$SCRIPT_DIR/start-server.sh" "$TARGET_BDS/start-server.sh"
+    chmod +x "$TARGET_BDS/start-server.sh" 2>/dev/null || true
+fi
+
 # Ajustar permisos
 chmod -R 755 "$BP_TARGET_DIR" 2>/dev/null || true
 
@@ -100,9 +113,11 @@ echo "================================================================="
 echo "   ¡INSTALACIÓN COMPLETADA CON ÉXITO!                            "
 echo "================================================================="
 echo "Total de addons instalados: 26 behavior packs."
+echo "Persistencia activa: Puente SQLite V3 (Modo WAL anti-corrupción)."
 echo ""
-echo "Siguientes pasos en tu nuevo VPS:"
-echo "1. Si el servidor BDS ya está corriendo, escribe en la consola BDS: reload"
-echo "2. Si el servidor está detenido, inícialo con: LD_LIBRARY_PATH=. ./bedrock_server"
-echo "3. Revisa la consola o BDS.runtime.log para verificar que los 26 addons inicien correctamente."
+echo "Para iniciar el servidor con protección SQLite y cero pérdida de datos:"
+echo "  ./start-server.sh"
+echo ""
+echo "Para verificar el estado de la base de datos:"
+echo "  node bridge/test-bridge.js"
 echo "================================================================="

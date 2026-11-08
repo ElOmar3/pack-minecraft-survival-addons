@@ -9,6 +9,7 @@ Incluye sistemas avanzados de economía, protección con partículas y banderas,
 ## 📚 Documentación y Guías Disponibles
 
 - 📖 **[Guía Maestra de Jugadores y Comandos (GUIA_JUGADORES.md)](GUIA_JUGADORES.md):** Manual completo para jugadores y moderadores con la descripción de cada addon, guía de onboarding para nuevos usuarios, mecánicas avanzadas y tabla detallada de comandos en español.
+- 🛡️ **[Sistema de Persistencia SQLite V3 (docs/SISTEMA_PERSISTENCIA_SQLITE.md)](docs/SISTEMA_PERSISTENCIA_SQLITE.md):** Arquitectura técnica del puente SQLite en modo WAL, prevención de corrupción de LevelDB, respaldos automáticos y guía de restauración.
 
 ---
 
@@ -18,11 +19,14 @@ Incluye sistemas avanzados de economía, protección con partículas y banderas,
 |---|---|
 | `behavior_packs/` | Código fuente modular de los 26 addons en JavaScript moderno (ES Modules). |
 | `mcpacks/` | Los 26 addons listos para producción compilados individualmente en formato `.mcpack`. |
+| `bridge/` | Demonio supervisor en Node.js y motor de persistencia SQLite V3 con modo WAL. |
 | `world_config/` | Archivos `world_behavior_packs.json` y `world_resource_packs.json` con el orden exacto de carga. |
 | `tools/` | Utilidades y scripts de empaquetado y validación de sintaxis (`build-mcpacks.js`). |
 | `sources/` | Traducción y localización `es_MX.lang`. |
 | `manifest_addons.json` | Registro de UUIDs, versiones y dependencias de la suite. |
 | `install.sh` | Script instalador automatizado para servidores Linux / VPS. |
+| `start-server.sh` | Lanzador supervisado para Linux / VPS con protección SQLite activa. |
+| `start-server.bat` | Lanzador supervisado para Windows con protección SQLite activa. |
 | `GUIA_JUGADORES.md` | Guía detallada para la comunidad y jugadores del servidor. |
 
 ---
@@ -115,13 +119,17 @@ Incluye sistemas avanzados de economía, protección con partículas y banderas,
    content-log-file-enabled=true
    content-log-console-output-enabled=true
    ```
-5. Inicia el servidor:
-   ```bash
-   LD_LIBRARY_PATH=. ./bedrock_server
-   ```
+5. Inicia el servidor con el supervisor SQLite (recomendado para cero pérdida de datos):
+   - **En Linux / VPS:**
+     ```bash
+     ./start-server.sh
+     ```
+   - **En Windows:**
+     Ejecuta `start-server.bat` haciendo doble clic o desde PowerShell.
+
 6. Si actualizas con el servidor encendido, escribe en la consola de comandos de BDS:
    ```text
    reload
    ```
 
-Toda la base de datos persistente se conservará y sincronizará de forma transparente mediante el puente SQLite (`[SQLITE_SAVE_V1]`).
+Toda la base de datos persistente se conservará en `data/pacifico_server.db` en modo WAL y se sincronizará de forma transparente mediante el puente SQLite (`[SQLITE_SAVE_V1]`). Consulta la documentación técnica en [docs/SISTEMA_PERSISTENCIA_SQLITE.md](docs/SISTEMA_PERSISTENCIA_SQLITE.md).
