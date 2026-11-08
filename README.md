@@ -8,7 +8,9 @@ Incluye sistemas avanzados de economía, protección con partículas y banderas,
 
 ## 📚 Documentación y Guías Disponibles
 
-- 📖 **[Guía Maestra de Jugadores y Comandos (GUIA_JUGADORES.md)](GUIA_JUGADORES.md):** Manual completo para jugadores y moderadores con la descripción de cada addon, guía de onboarding para nuevos usuarios, mecánicas avanzadas y tabla detallada de comandos en español.
+- 📖 **[Guía Detallada de los 26 Addons (GUIA_DETALLADA_ADDONS.md)](GUIA_DETALLADA_ADDONS.md):** Explicación a fondo de cada addon: qué es, para qué sirve, cómo funciona por dentro, eventos, fórmulas y comandos.
+- 🔑 **[Guía de Administración Segura y Enrolamiento con Token (docs/GUIA_ADMINISTRACION_Y_ROLES.md)](docs/GUIA_ADMINISTRACION_Y_ROLES.md):** Manual de seguridad para administradores: cómo generar tu token único, enrolarte como OWNER en el servidor, jerarquía de roles y límites automáticos contra abusos de staff.
+- 📜 **[Guía Maestra de Jugadores y Comandos (GUIA_JUGADORES.md)](GUIA_JUGADORES.md):** Manual para jugadores con tabla completa de comandos en español, guía de bienvenida (30m de inmunidad PvP, RTP) y mecánicas de supervivencia.
 - 🛡️ **[Sistema de Persistencia SQLite V3 (docs/SISTEMA_PERSISTENCIA_SQLITE.md)](docs/SISTEMA_PERSISTENCIA_SQLITE.md):** Arquitectura técnica del puente SQLite en modo WAL, prevención de corrupción de LevelDB, respaldos automáticos y guía de restauración.
 
 ---
@@ -26,7 +28,8 @@ Incluye sistemas avanzados de economía, protección con partículas y banderas,
 | `manifest_addons.json` | Registro de UUIDs, versiones y dependencias de la suite. |
 | `install.sh` | Script instalador automatizado para servidores Linux / VPS. |
 | `start-server.sh` | Lanzador supervisado para Linux / VPS con protección SQLite activa. |
-| `start-server.bat` | Lanzador supervisado para Windows con protección SQLite activa. |
+| start-server.bat | Lanzador supervisado para Windows con protección SQLite activa. |
+| GUIA_DETALLADA_ADDONS.md | Documentación técnica exhaustiva de los 26 addons uno por uno. |
 | `GUIA_JUGADORES.md` | Guía detallada para la comunidad y jugadores del servidor. |
 
 ---

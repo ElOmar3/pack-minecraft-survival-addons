@@ -1,8 +1,8 @@
-// Generated locally by tools/fcx_admin_provision.py. Never commit this file.
+// Archivo generado automáticamente por tools/generate_admin_token.js
 export const OWNER_PROVISIONING = Object.freeze({
   enabled: true,
-  nonceHash: "723f1ed6c659994b0ca07f56eb242f3514186904285f15a8d3e57bc5ec0f315f",
-  expiresAt: 1785626602378,
-  tokenDerivationKeyHex: "44aee7099590b809672912b955a47c776cbebe7fe252802fc599f905f7caf70d",
-  generatedAt: 1785625702378
+  nonceHash: "07af81a51a23e3a3f876386450369d450f649f44c597c5d14b08165274e50126",
+  expiresAt: 1794287006736,
+  tokenDerivationKeyHex: "503171a51e485f1a8e03e5f204e19c0b2bef0f24f996ef1ccd92a8aadb1842e3",
+  generatedAt: 1794114206736
 });
