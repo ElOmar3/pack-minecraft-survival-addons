@@ -9,6 +9,9 @@ import { ActionFormData, ModalFormData } from "@minecraft/server-ui";
 
 // === PERSISTENCIA SQLITE PUENTE V3 (SEGURO PARA /reload) ===
 if (!globalThis.__sqlite_store_v2__) globalThis.__sqlite_store_v2__ = new Map();
+if (!globalThis.__sqlite_write_ts_v3__) globalThis.__sqlite_write_ts_v3__ = new Map();
+if (!globalThis.__sqlite_pending_v3__) globalThis.__sqlite_pending_v3__ = new Map();
+if (!globalThis.__sqlite_unflushed_v3__) globalThis.__sqlite_unflushed_v3__ = new Map();
 if (!globalThis.__sqlite_owner_key_v2__) {
   globalThis.__sqlite_owner_key_v2__ = function(owner) {
     if (typeof owner === "string") return owner;
@@ -26,6 +29,18 @@ if (!globalThis.__sqlite_get_prop_v2__) {
     return ownerStore ? ownerStore[key] : undefined;
   };
 }
+// Lector tolerante: el demonio rehidrata objetos ya parseados; los datos legacy son strings JSON.
+if (!globalThis.__sqlite_read_json_v3__) {
+  globalThis.__sqlite_read_json_v3__ = function(raw, fallback) {
+    const fb = fallback === undefined ? null : fallback;
+    if (raw === undefined || raw === null) return fb;
+    if (typeof raw === "object") return raw;
+    if (typeof raw !== "string") return raw;
+    const text = raw.trim();
+    if (!text) return fb;
+    try { return JSON.parse(text); } catch (e) { return fb; }
+  };
+}
 if (!globalThis.__sqlite_set_prop_v2__) {
   globalThis.__sqlite_set_prop_v2__ = function(addon, owner, key, value) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
@@ -38,7 +53,21 @@ if (!globalThis.__sqlite_set_prop_v2__) {
     const payload = { addon: addonKey, owner: ownerKey, key };
     if (value === undefined) { delete ownerStore[key]; payload.deleted = true; }
     else { ownerStore[key] = value; payload.deleted = false; payload.value = value; }
-    try { console.warn("[SQLITE_SAVE_V1] " + JSON.stringify(payload)); } catch (e) {}
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    globalThis.__sqlite_write_ts_v3__.set(compositeKey, Date.now());
+    try {
+      const line = "[SQLITE_SAVE_V1] " + JSON.stringify(payload);
+      // Gating: las escrituras previas a sync_complete se encolan y se emiten al confirmar el snapshot.
+      if (globalThis.__sqlite_is_ready_v3__(addonKey)) console.warn(line);
+      else {
+        let queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+        if (!queue) { queue = []; globalThis.__sqlite_pending_v3__.set(addonKey, queue); }
+        queue.push(line);
+        let marks = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+        if (!marks) { marks = new Set(); globalThis.__sqlite_unflushed_v3__.set(addonKey, marks); }
+        marks.add(compositeKey);
+      }
+    } catch (e) {}
   };
 }
 if (!globalThis.__sqlite_rehydrate_v2__) {
@@ -46,6 +75,13 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
     const addonKey = String(addon);
     const ownerKey = globalThis.__sqlite_owner_key_v2__(owner);
+    // Versionado: una escritura local posterior a la solicitud de sync (o aún no drenada al demonio) gana sobre el snapshot.
+    const status = globalThis.__sqlite_sync_status_v3__.get(addonKey);
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    const writeTs = globalThis.__sqlite_write_ts_v3__.get(compositeKey);
+    const unflushed = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+    if (unflushed && unflushed.has(compositeKey)) return;
+    if (status && status.requestedAt !== undefined && writeTs !== undefined && writeTs >= status.requestedAt) return;
     let addonStore = globalThis.__sqlite_store_v2__.get(addonKey);
     if (!addonStore) { addonStore = new Map(); globalThis.__sqlite_store_v2__.set(addonKey, addonStore); }
     let ownerStore = addonStore.get(ownerKey);
@@ -56,16 +92,35 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
 }
 if (!globalThis.__sqlite_sync_complete_v2__) globalThis.__sqlite_sync_complete_v2__ = new Map();
 if (!globalThis.__sqlite_sync_status_v3__) globalThis.__sqlite_sync_status_v3__ = new Map();
+if (!globalThis.__sqlite_is_ready_v3__) {
+  globalThis.__sqlite_is_ready_v3__ = function(addon) {
+    const status = globalThis.__sqlite_sync_status_v3__.get(String(addon));
+    return Boolean(status && (status.complete || status.degraded));
+  };
+}
+if (!globalThis.__sqlite_flush_pending_v3__) {
+  globalThis.__sqlite_flush_pending_v3__ = function(addon) {
+    const addonKey = String(addon);
+    const queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+    if (!queue || queue.length === 0) return;
+    globalThis.__sqlite_pending_v3__.delete(addonKey);
+    globalThis.__sqlite_unflushed_v3__.delete(addonKey);
+    for (const line of queue) { try { console.warn(line); } catch (e) {} }
+  };
+}
 if (!globalThis.__sqlite_request_sync_v3__) {
   globalThis.__sqlite_request_sync_v3__ = function(addon, attempt) {
     const addonKey = String(addon || "");
     if (!addonKey) return;
     const previous = globalThis.__sqlite_sync_status_v3__.get(addonKey) || {};
+    // Conservar la ventana original en reintentos para que el guard de versión no se relaje.
+    const keepWindow = previous.requestedAt && !previous.complete && !previous.degraded;
     globalThis.__sqlite_sync_status_v3__.set(addonKey, {
       ...previous,
-      requestedAt: Date.now(),
+      requestedAt: keepWindow ? previous.requestedAt : Date.now(),
       attempt: Number(attempt || 0),
       complete: false,
+      degraded: false,
       protocol: 0,
     });
     try { console.warn("[SQLITE_REQUEST_SYNC] " + JSON.stringify({ addon: addonKey, protocol: 3, attempt: Number(attempt || 0) })); } catch (e) {}
@@ -77,6 +132,7 @@ try {
   if (!globalThis.__sqlite_listener_callback_v3__) {
     const callback = function(event) {
     if (!event || (event.id !== "sqlite:load" && event.id !== "sqlite:sync" && event.id !== "sqlite:load_chunk" && event.id !== "sqlite:sync_complete")) return;
+    // Solo el demonio (consola del servidor) puede rehidratar; un jugador jamás debe inyectar estado.
     if (event.sourceEntity && event.sourceEntity.typeId === "minecraft:player") return;
     try {
       const payload = JSON.parse(event.message || "{}");
@@ -92,13 +148,14 @@ try {
             protocol: Number(payload.protocol || 0),
             entryCount: Number(payload.entryCount || 0),
           });
+          globalThis.__sqlite_flush_pending_v3__(addonKey);
         }
         return;
       }
       if (event.id === "sqlite:load_chunk") {
         const count = Number(payload.chunkCount);
         const index = Number(payload.chunkIndex);
-        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 128 || !Number.isInteger(index) || index < 0 || index >= count) return;
+        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 4096 || !Number.isInteger(index) || index < 0 || index >= count) return;
         const chunkKey = String(payload.chunkId);
         let state = globalThis.__sqlite_chunk_store_v2__.get(chunkKey);
         if (!state || state.count !== count) {
@@ -133,6 +190,17 @@ system.runTimeout(() => {
     if (!state || Number(state.protocol || 0) < 3) globalThis.__sqlite_request_sync_v3__("protection_addon", 1);
   } catch (e) {}
 }, 120);
+system.runTimeout(() => {
+  // Sin demonio (mundo importado sin bridge) se opera en modo degradado tras ~10s: RAM es la fuente de verdad.
+  try {
+    const state = globalThis.__sqlite_sync_status_v3__.get("protection_addon");
+    if (state && !state.complete) {
+      state.degraded = true;
+      globalThis.__sqlite_sync_complete_v2__.set("protection_addon", Date.now());
+      globalThis.__sqlite_flush_pending_v3__("protection_addon");
+    }
+  } catch (e) {}
+}, 200);
 // === FIN PERSISTENCIA SQLITE PUENTE V3 ===
 console.warn("Zone Protection Addon iniciado.");
 system.runTimeout(() => { try { const entries = [].map((id) => { const value = globalThis.__sqlite_get_prop_v2__("protection_addon", "world", id); return { id, size: typeof value === "string" ? value.length : value === undefined ? 0 : String(value).length }; }).sort((a, b) => b.size - a.size); console.warn(`[DP_AUDIT_PROTECTION_V1] total_chars=${entries.reduce((sum, entry) => sum + entry.size, 0)} largest=${JSON.stringify(entries.slice(0, 12))}`); } catch (e) { console.warn(`[DP_AUDIT_PROTECTION_V1] failed=${String(e?.message || e)}`); } }, 100);
@@ -193,18 +261,31 @@ const privateEjectionDiagnostics = new Map();
 function loadZones() {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("protection_addon", "world", ZONES_DB_KEY);
+    // Caché activa: mientras el valor del puente no cambie (identidad estricta)
+    // se devuelve la lista ya parseada. Cualquier mutación real (saveZones o
+    // rehidratación del demonio) reemplaza el valor y la invalida sola.
+    if (raw === zonesCacheRaw) {
+      zonesDataAvailable = true;
+      return zonesCache;
+    }
     if (raw === undefined || raw === null) {
       zonesDataAvailable = true;
-      return [];
+      zonesCacheRaw = raw;
+      zonesCache = [];
+      return zonesCache;
     }
     if (Array.isArray(raw)) {
       zonesDataAvailable = true;
+      zonesCacheRaw = raw;
+      zonesCache = raw;
       return raw;
     }
     if (typeof raw === "string") {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         zonesDataAvailable = true;
+        zonesCacheRaw = raw;
+        zonesCache = parsed;
         return parsed;
       }
     }
@@ -217,10 +298,23 @@ function loadZones() {
   }
 }
 
+// Banderas configurables por terreno. Los valores por defecto preservan el
+// comportamiento histórico: PvP permitido en claims privados, explosiones y
+// puertas de visitantes bloqueadas hasta que el dueño las habilite.
+function normalizeZoneFlags(flags) {
+  const source = flags && typeof flags === "object" ? flags : {};
+  return {
+    pvp: source.pvp === undefined ? true : source.pvp === true,
+    explosions: source.explosions === true,
+    visitor_doors: source.visitor_doors === true,
+  };
+}
+
 function loadZonesForUpdate() {
   loadZones();
   return loadZones().map((zone) => ({
     ...zone,
+    flags: normalizeZoneFlags(zone?.flags),
     min: zone?.min ? { ...zone.min } : zone?.min,
     max: zone?.max ? { ...zone.max } : zone?.max,
     trusted: Array.isArray(zone?.trusted) ? [...zone.trusted] : zone?.trusted,
@@ -276,7 +370,7 @@ function getActiveColiseumId() {
 function loadBountyColiseumSession() {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("protection_addon", "world", "bounty_coliseum_session");
-    return raw ? JSON.parse(String(raw)) : null;
+    return raw ? globalThis.__sqlite_read_json_v3__(raw) : null;
   } catch (e) { ErrorReporter.report(e, { addonId: "protection_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
     return null;
   }
@@ -335,8 +429,8 @@ function getExtraZoneAllowance(player) {
     if (Number.isFinite(shared)) allowance = Math.max(allowance, shared);
   } catch (e) {}
   try {
-    const raw = String(globalThis.__sqlite_get_prop_v2__("protection_addon", "world", EXTRA_ZONES_REGISTRY_KEY) ?? "");
-    const registry = raw ? JSON.parse(raw) : {};
+    const raw = globalThis.__sqlite_get_prop_v2__("protection_addon", "world", EXTRA_ZONES_REGISTRY_KEY);
+    const registry = globalThis.__sqlite_read_json_v3__(raw, {});
     const registered = Math.floor(Number(registry?.[String(player.name).toLowerCase()] ?? 0));
     if (Number.isFinite(registered)) allowance = Math.max(allowance, registered);
   } catch (e) {}
@@ -470,7 +564,7 @@ function getColiseumPairKey(firstName, secondName) {
 function loadColiseumEconomy() {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("protection_addon", "world", COLISEUM_ECONOMY_KEY);
-    const parsed = raw ? JSON.parse(String(raw)) : {};
+    const parsed = raw ? globalThis.__sqlite_read_json_v3__(raw) : {};
     return {
       unavailable: false,
       pairs: typeof parsed.pairs === "object" && parsed.pairs ? parsed.pairs : {},
@@ -607,7 +701,7 @@ function getSafeTeleportPosition(dimension, destination) {
 function loadModerationBans() {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("protection_addon", "world", "bans_db");
-    return raw ? JSON.parse(raw) : [];
+    return globalThis.__sqlite_read_json_v3__(raw, []);
   } catch (e) { ErrorReporter.report(e, { addonId: "protection_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
     return [];
   }
@@ -849,6 +943,14 @@ const BOUNDARY_MARKERS_DB_KEY = "boundary_markers_v1";
 const BOUNDARY_MARKER_LIMIT = 64;
 const BOUNDARY_RENDER_INTERVAL_TICKS = 20;
 const BOUNDARY_RENDER_DISTANCE = 192;
+// Muestreo temporal: con el jugador y la zona quietos, las partículas se
+// refrescan cada 2 s en lugar de cada segundo; cualquier cambio las repinta al
+// instante. Reduce a la mitad los paquetes visuales sin perder el perímetro.
+const BOUNDARY_STATIONARY_REFRESH_MS = 2000;
+let boundaryMarkersCacheRaw;
+let boundaryMarkersCache = [];
+const boundaryRenderState = new Map();
+const zoneBorderRenderState = new Map();
 
 function normalizeBoundaryMarkerName(value) {
   return String(value || "")
@@ -904,8 +1006,13 @@ function boundaryMarkerId(dimension, location) {
 function loadBoundaryMarkers() {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("protection_addon", "world", BOUNDARY_MARKERS_DB_KEY);
+    // Misma caché de identidad que loadZones: el bucle de render ya no reparsea
+    // el registro en cada intervalo si nadie colocó o retiró marcadores.
+    if (raw === boundaryMarkersCacheRaw) return boundaryMarkersCache;
     const parsed = Array.isArray(raw) ? raw : (typeof raw === "string" && raw ? JSON.parse(raw) : []);
-    return Array.isArray(parsed) ? parsed.filter((marker) => marker && typeof marker.id === "string") : [];
+    boundaryMarkersCacheRaw = raw;
+    boundaryMarkersCache = Array.isArray(parsed) ? parsed.filter((marker) => marker && typeof marker.id === "string") : [];
+    return boundaryMarkersCache;
   } catch (error) {
     ErrorReporter.report(error, { addonId: "protection_addon", moduleId: "main.js", operation: "loadBoundaryMarkers", category: "runtime" });
     return [];
@@ -914,7 +1021,10 @@ function loadBoundaryMarkers() {
 
 function saveBoundaryMarkers(markers) {
   try {
-    globalThis.__sqlite_set_prop_v2__("protection_addon", "world", BOUNDARY_MARKERS_DB_KEY, JSON.stringify(markers));
+    const raw = JSON.stringify(markers);
+    globalThis.__sqlite_set_prop_v2__("protection_addon", "world", BOUNDARY_MARKERS_DB_KEY, raw);
+    boundaryMarkersCacheRaw = raw;
+    boundaryMarkersCache = markers.filter((marker) => marker && typeof marker.id === "string");
     return true;
   } catch (error) {
     ErrorReporter.report(error, { addonId: "protection_addon", moduleId: "main.js", operation: "saveBoundaryMarkers", category: "runtime" });
@@ -980,10 +1090,13 @@ function removeBoundaryMarkerAt(dimensionId, location) {
 
 function renderBoundaryMarkers() {
   const markers = loadBoundaryMarkers();
-  if (!markers.length) return;
+  if (!markers.length) { boundaryRenderState.clear(); return; }
+  const players = world.getAllPlayers();
+  if (!players.length) { boundaryRenderState.clear(); return; }
   const zones = loadZones();
   const retained = [];
   let changed = false;
+  const now = Date.now();
   for (const marker of markers) {
     try {
       const dimension = world.getDimension(marker.dimension);
@@ -991,20 +1104,31 @@ function renderBoundaryMarkers() {
       const zone = zones.find((candidate) => markerMatchesZone(marker, candidate));
       if (block?.typeId !== BOUNDARY_MARKER_BLOCK || !zone) {
         changed = true;
+        boundaryRenderState.delete(marker.id);
         continue;
       }
       retained.push(marker);
-      const nearby = world.getAllPlayers().some((player) => {
-        if (player.dimension?.id !== marker.dimension) return false;
+      let nearbyPlayer;
+      let bestDistance = Infinity;
+      for (const player of players) {
+        if (player.dimension?.id !== marker.dimension) continue;
         const dx = player.location.x - marker.x;
         const dy = player.location.y - marker.y;
         const dz = player.location.z - marker.z;
-        return dx * dx + dy * dy + dz * dz <= BOUNDARY_RENDER_DISTANCE * BOUNDARY_RENDER_DISTANCE;
-      });
-      if (!nearby) continue;
+        const distance = dx * dx + dy * dy + dz * dz;
+        if (distance <= BOUNDARY_RENDER_DISTANCE * BOUNDARY_RENDER_DISTANCE && distance < bestDistance) {
+          bestDistance = distance;
+          nearbyPlayer = player;
+        }
+      }
+      if (!nearbyPlayer) { boundaryRenderState.delete(marker.id); continue; }
       const minY = zoneCoversFullHeight(zone) ? -64 : Math.floor(Number(zone.min?.y));
       const maxY = zoneCoversFullHeight(zone) ? 320 : Math.floor(Number(zone.max?.y));
       const displayY = Math.max(minY, Math.min(maxY, marker.y + 1));
+      const signature = `${zone.min?.x}|${zone.max?.x}|${zone.min?.z}|${zone.max?.z}|${displayY}|${Math.floor(nearbyPlayer.location.x / 4)}|${Math.floor(nearbyPlayer.location.z / 4)}`;
+      const previous = boundaryRenderState.get(marker.id);
+      if (previous && previous.signature === signature && now - previous.at < BOUNDARY_STATIONARY_REFRESH_MS) continue;
+      boundaryRenderState.set(marker.id, { signature, at: now });
       for (const point of boundaryPreviewPoints(zone, displayY)) {
         dimension.spawnParticle("minecraft:colored_flame_particle", point);
       }
@@ -1154,7 +1278,7 @@ function getPaidFarmButtonAt(pos, dimId, zones = loadZones()) {
 function getPaidFarmSession(player) {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("protection_addon", player, PAID_FARM_SESSION_PROPERTY);
-    return raw ? JSON.parse(String(raw)) : undefined;
+    return raw ? globalThis.__sqlite_read_json_v3__(raw) : undefined;
   } catch { return undefined; }
 }
 
@@ -1833,6 +1957,9 @@ function checkPermission(player, pos, dimId, actionType = "build") {
   return true;
 }
 
+// Hook cross-pack: otros addons revalidan zonas en callbacks diferidos (setType) que no disparan beforeEvents.
+globalThis.__protection_check_v1__ = checkPermission;
+
 function isPrivateClaimZone(zone) {
   return Boolean(zone) && !zone.disabled && !zone.isAdmin && !zone.isCommunity && !isColiseumZone(zone);
 }
@@ -2287,6 +2414,24 @@ try {
     }
 
     const inAdminZone = inAdminZoneVictim || inAdminZoneAttacker;
+
+    // PvP configurable en terrenos privados: si el dueño desactivó la bandera
+    // pvp, se bloquea el daño entre jugadores dentro de su claim. Las safezones
+    // admin ya cancelan todo el daño más abajo y los coliseos gestionan su duelo.
+    if (!inAdminZone && victim.typeId === "minecraft:player" && attacker?.typeId === "minecraft:player"
+        && !zones.some(isColiseumZone) && !getActiveColiseumMatchForPlayer(victim)) {
+      const attackerZones = getZonesAt(attacker.location, attacker.dimension.id);
+      const pvpDisabled = zones.concat(attackerZones).some(z => isPrivateClaimZone(z) && z.flags?.pvp === false);
+      if (pvpDisabled) {
+        event.cancel = true;
+        system.run(() => {
+          try {
+            attacker.sendMessage("§b§l[§3Protección§b§l]§r §cEl PvP está desactivado en este terreno.");
+          } catch (err) { ErrorReporter.report(err, { addonId: "protection_addon", moduleId: "main.js", operation: "zonePvpFlag", category: "runtime" }); }
+        });
+        return;
+      }
+    }
 
     if (inAdminZone) {
       // Si la víctima es un jugador o criatura aliada en zona admin, cancelamos TODO tipo de daño
@@ -2878,7 +3023,8 @@ function handleClaim(player, name, isAdminClaim = false, isCommunityClaim = fals
     createdAt: Date.now(),
     pricePaid: claimPrice,
     pricingVersion: (isAdminClaim || isCommunityClaim) ? "admin_no_charge" : "area_v1",
-    trusted: []
+    trusted: [],
+    flags: normalizeZoneFlags({})
   };
 
   // Cobrar dinero si no es zona administrativa o comunitaria
@@ -2969,6 +3115,7 @@ function handleColiseumClaim(player, name) {
     max,
     createdAt: Date.now(),
     trusted: [],
+    flags: normalizeZoneFlags({})
   };
 
   db.push(newZone);
@@ -3085,6 +3232,111 @@ function handleZoneCommand(player, sub, param) {
   }
 
   saveZones(db);
+}
+
+// Vista previa de límites por jugador (/s:zona bordes). Reutiliza el mismo
+// gestor de partículas que los marcadores físicos: dibuja el perímetro del
+// terreno durante un tiempo limitado sin modificar zonas ni bloques.
+const zoneBorderPreviews = new Map();
+const ZONE_BORDER_PREVIEW_DURATION_MS = 60000;
+
+function toggleZoneBorders(player) {
+  if (!player) return;
+  const zones = getZonesAt(player.location, player.dimension.id);
+  const myZone = zones.find(z => !z.disabled && (normalizeZonePlayerName(z.owner) === normalizeZonePlayerName(player.name) || isPlayerOp(player)));
+  if (!myZone) {
+    player.sendMessage("§b§l[§3Protección§b§l]§r §cDebes estar dentro de tu terreno para mostrar sus límites.");
+    return;
+  }
+  const key = normalizeZonePlayerName(player.name);
+  const existing = zoneBorderPreviews.get(key);
+  if (existing && String(existing.zoneId) === String(myZone.id)) {
+    zoneBorderPreviews.delete(key);
+    player.sendMessage(`§b§l[§3Protección§b§l]§r §7Límites de §e${myZone.name || "tu terreno"}§7 ocultos.`);
+    return;
+  }
+  zoneBorderPreviews.set(key, {
+    zoneId: myZone.id,
+    dimension: player.dimension.id,
+    expiresAt: Date.now() + ZONE_BORDER_PREVIEW_DURATION_MS,
+  });
+  player.sendMessage(`§b§l[§3Protección§b§l]§r §aLímites de §e${myZone.name || "tu terreno"}§a visibles durante §f60§as. Usa §e/s:zona bordes§a de nuevo para ocultarlos.`);
+}
+
+function renderZoneBorderPreviews() {
+  if (!zoneBorderPreviews.size) { zoneBorderRenderState.clear(); return; }
+  const now = Date.now();
+  const zones = loadZones();
+  const players = world.getAllPlayers();
+  for (const [key, preview] of [...zoneBorderPreviews.entries()]) {
+    if (preview.expiresAt <= now) { zoneBorderPreviews.delete(key); zoneBorderRenderState.delete(key); continue; }
+    const player = players.find(p => normalizeZonePlayerName(p.name) === key);
+    if (!player || player.dimension?.id !== preview.dimension) { zoneBorderPreviews.delete(key); zoneBorderRenderState.delete(key); continue; }
+    const zone = zones.find(z => String(z.id) === String(preview.zoneId));
+    if (!zone || zone.disabled === true) { zoneBorderPreviews.delete(key); zoneBorderRenderState.delete(key); continue; }
+    try {
+      const minY = zoneCoversFullHeight(zone) ? -64 : Math.floor(Number(zone.min?.y));
+      const maxY = zoneCoversFullHeight(zone) ? 320 : Math.floor(Number(zone.max?.y));
+      const displayY = Math.max(minY, Math.min(maxY, Math.floor(player.location.y)));
+      const signature = `${zone.min?.x}|${zone.max?.x}|${zone.min?.z}|${zone.max?.z}|${displayY}|${Math.floor(player.location.x / 4)}|${Math.floor(player.location.z / 4)}`;
+      const previous = zoneBorderRenderState.get(key);
+      if (previous && previous.signature === signature && now - previous.at < BOUNDARY_STATIONARY_REFRESH_MS) continue;
+      zoneBorderRenderState.set(key, { signature, at: now });
+      const dimension = world.getDimension(preview.dimension);
+      for (const point of boundaryPreviewPoints(zone, displayY)) {
+        dimension.spawnParticle("minecraft:colored_flame_particle", point);
+      }
+    } catch (error) {
+      ErrorReporter.report(error, { addonId: "protection_addon", moduleId: "main.js", operation: "renderZoneBorderPreviews", category: "runtime" });
+      zoneBorderPreviews.delete(key);
+      zoneBorderRenderState.delete(key);
+    }
+  }
+}
+
+system.runInterval(renderZoneBorderPreviews, BOUNDARY_RENDER_INTERVAL_TICKS);
+
+// GUI de banderas del terreno (/s:zona banderas). Reautoriza al dueño/operador
+// dentro del callback y persiste zone.flags en el bridge mediante saveZones.
+function openZoneFlagsGUI(player, zone) {
+  if (!player || !zone) return;
+  const flags = normalizeZoneFlags(zone.flags);
+  const form = new ModalFormData()
+    .title("Banderas del terreno")
+    .toggle("Permitir PvP entre jugadores", flags.pvp)
+    .toggle("Permitir explosiones (TNT/creepers)", flags.explosions)
+    .toggle("Visitantes pueden abrir puertas", flags.visitor_doors);
+
+  safeOpenForm(player, form, (response) => {
+    if (!player.isValid) return;
+    const values = response.formValues || [];
+    const db = loadZonesForUpdate();
+    const matchIdx = db.findIndex(z => String(z.id) === String(zone.id));
+    if (matchIdx === -1) {
+      player.sendMessage("§b§l[§3Protección§b§l]§r §cNo se encontró esa protección. Vuelve a abrir el menú.");
+      return;
+    }
+    const currentZone = db[matchIdx];
+    if (currentZone.disabled === true) {
+      player.sendMessage("§b§l[§3Protección§b§l]§r §cEsta protección está inactiva por solapamiento; administra el terreno principal activo.");
+      return;
+    }
+    if (normalizeZonePlayerName(currentZone.owner) !== normalizeZonePlayerName(player.name) && !isPlayerOp(player)) {
+      player.sendMessage("§b§l[§3Protección§b§l]§r §cNo tienes permiso para administrar esta protección.");
+      return;
+    }
+    currentZone.flags = {
+      pvp: values[0] === true,
+      explosions: values[1] === true,
+      visitor_doors: values[2] === true,
+    };
+    if (!saveZones(db)) {
+      player.sendMessage("§b§l[§3Protección§b§l]§r §cNo se pudieron guardar las banderas. Inténtalo de nuevo.");
+      return;
+    }
+    const onOff = (v) => v ? "§aON" : "§cOFF";
+    player.sendMessage(`§b§l[§3Protección§b§l]§r §aBanderas de §e${currentZone.name || "tu terreno"}§a actualizadas: §fPvP ${onOff(currentZone.flags.pvp)}§7, §fExplosiones ${onOff(currentZone.flags.explosions)}§7, §fPuertas ${onOff(currentZone.flags.visitor_doors)}§7.`);
+  });
 }
 
 function handleTrustCommand(player, sub, targetName) {

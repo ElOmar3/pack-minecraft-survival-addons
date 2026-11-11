@@ -1,3 +1,7 @@
+// Techo FIFO de claves de idempotencia: el registro de transacciones procesadas
+// no debe crecer sin límite. Se conservan las 4.096 más recientes.
+const MAX_PROCESSED_KEYS = 4096;
+
 export class EconomyTransactionService {
     constructor(ledger, detector) {
         this.ledger = ledger;
@@ -49,6 +53,12 @@ export class EconomyTransactionService {
         // Post-state validation (could be added here)
 
         this.processedKeys.add(idempotencyKey);
+        if (this.processedKeys.size > MAX_PROCESSED_KEYS) {
+            for (const key of this.processedKeys) {
+                this.processedKeys.delete(key);
+                if (this.processedKeys.size <= MAX_PROCESSED_KEYS) break;
+            }
+        }
         this.ledger.append(txRequest);
         
         return true;

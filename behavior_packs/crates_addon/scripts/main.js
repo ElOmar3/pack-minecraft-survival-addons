@@ -9,6 +9,9 @@ import { ActionFormData } from "@minecraft/server-ui";
 
 // === PERSISTENCIA SQLITE PUENTE V3 (SEGURO PARA /reload) ===
 if (!globalThis.__sqlite_store_v2__) globalThis.__sqlite_store_v2__ = new Map();
+if (!globalThis.__sqlite_write_ts_v3__) globalThis.__sqlite_write_ts_v3__ = new Map();
+if (!globalThis.__sqlite_pending_v3__) globalThis.__sqlite_pending_v3__ = new Map();
+if (!globalThis.__sqlite_unflushed_v3__) globalThis.__sqlite_unflushed_v3__ = new Map();
 if (!globalThis.__sqlite_owner_key_v2__) {
   globalThis.__sqlite_owner_key_v2__ = function(owner) {
     if (typeof owner === "string") return owner;
@@ -26,6 +29,18 @@ if (!globalThis.__sqlite_get_prop_v2__) {
     return ownerStore ? ownerStore[key] : undefined;
   };
 }
+// Lector tolerante: el demonio rehidrata objetos ya parseados; los datos legacy son strings JSON.
+if (!globalThis.__sqlite_read_json_v3__) {
+  globalThis.__sqlite_read_json_v3__ = function(raw, fallback) {
+    const fb = fallback === undefined ? null : fallback;
+    if (raw === undefined || raw === null) return fb;
+    if (typeof raw === "object") return raw;
+    if (typeof raw !== "string") return raw;
+    const text = raw.trim();
+    if (!text) return fb;
+    try { return JSON.parse(text); } catch (e) { return fb; }
+  };
+}
 if (!globalThis.__sqlite_set_prop_v2__) {
   globalThis.__sqlite_set_prop_v2__ = function(addon, owner, key, value) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
@@ -38,7 +53,21 @@ if (!globalThis.__sqlite_set_prop_v2__) {
     const payload = { addon: addonKey, owner: ownerKey, key };
     if (value === undefined) { delete ownerStore[key]; payload.deleted = true; }
     else { ownerStore[key] = value; payload.deleted = false; payload.value = value; }
-    try { console.warn("[SQLITE_SAVE_V1] " + JSON.stringify(payload)); } catch (e) {}
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    globalThis.__sqlite_write_ts_v3__.set(compositeKey, Date.now());
+    try {
+      const line = "[SQLITE_SAVE_V1] " + JSON.stringify(payload);
+      // Gating: las escrituras previas a sync_complete se encolan y se emiten al confirmar el snapshot.
+      if (globalThis.__sqlite_is_ready_v3__(addonKey)) console.warn(line);
+      else {
+        let queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+        if (!queue) { queue = []; globalThis.__sqlite_pending_v3__.set(addonKey, queue); }
+        queue.push(line);
+        let marks = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+        if (!marks) { marks = new Set(); globalThis.__sqlite_unflushed_v3__.set(addonKey, marks); }
+        marks.add(compositeKey);
+      }
+    } catch (e) {}
   };
 }
 if (!globalThis.__sqlite_rehydrate_v2__) {
@@ -46,6 +75,13 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
     const addonKey = String(addon);
     const ownerKey = globalThis.__sqlite_owner_key_v2__(owner);
+    // Versionado: una escritura local posterior a la solicitud de sync (o aún no drenada al demonio) gana sobre el snapshot.
+    const status = globalThis.__sqlite_sync_status_v3__.get(addonKey);
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    const writeTs = globalThis.__sqlite_write_ts_v3__.get(compositeKey);
+    const unflushed = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+    if (unflushed && unflushed.has(compositeKey)) return;
+    if (status && status.requestedAt !== undefined && writeTs !== undefined && writeTs >= status.requestedAt) return;
     let addonStore = globalThis.__sqlite_store_v2__.get(addonKey);
     if (!addonStore) { addonStore = new Map(); globalThis.__sqlite_store_v2__.set(addonKey, addonStore); }
     let ownerStore = addonStore.get(ownerKey);
@@ -56,16 +92,35 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
 }
 if (!globalThis.__sqlite_sync_complete_v2__) globalThis.__sqlite_sync_complete_v2__ = new Map();
 if (!globalThis.__sqlite_sync_status_v3__) globalThis.__sqlite_sync_status_v3__ = new Map();
+if (!globalThis.__sqlite_is_ready_v3__) {
+  globalThis.__sqlite_is_ready_v3__ = function(addon) {
+    const status = globalThis.__sqlite_sync_status_v3__.get(String(addon));
+    return Boolean(status && (status.complete || status.degraded));
+  };
+}
+if (!globalThis.__sqlite_flush_pending_v3__) {
+  globalThis.__sqlite_flush_pending_v3__ = function(addon) {
+    const addonKey = String(addon);
+    const queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+    if (!queue || queue.length === 0) return;
+    globalThis.__sqlite_pending_v3__.delete(addonKey);
+    globalThis.__sqlite_unflushed_v3__.delete(addonKey);
+    for (const line of queue) { try { console.warn(line); } catch (e) {} }
+  };
+}
 if (!globalThis.__sqlite_request_sync_v3__) {
   globalThis.__sqlite_request_sync_v3__ = function(addon, attempt) {
     const addonKey = String(addon || "");
     if (!addonKey) return;
     const previous = globalThis.__sqlite_sync_status_v3__.get(addonKey) || {};
+    // Conservar la ventana original en reintentos para que el guard de versión no se relaje.
+    const keepWindow = previous.requestedAt && !previous.complete && !previous.degraded;
     globalThis.__sqlite_sync_status_v3__.set(addonKey, {
       ...previous,
-      requestedAt: Date.now(),
+      requestedAt: keepWindow ? previous.requestedAt : Date.now(),
       attempt: Number(attempt || 0),
       complete: false,
+      degraded: false,
       protocol: 0,
     });
     try { console.warn("[SQLITE_REQUEST_SYNC] " + JSON.stringify({ addon: addonKey, protocol: 3, attempt: Number(attempt || 0) })); } catch (e) {}
@@ -77,6 +132,8 @@ try {
   if (!globalThis.__sqlite_listener_callback_v3__) {
     const callback = function(event) {
     if (!event || (event.id !== "sqlite:load" && event.id !== "sqlite:sync" && event.id !== "sqlite:load_chunk" && event.id !== "sqlite:sync_complete")) return;
+    // Solo el demonio (consola del servidor) puede rehidratar; un jugador jamás debe inyectar estado.
+    if (event.sourceEntity && event.sourceEntity.typeId === "minecraft:player") return;
     try {
       const payload = JSON.parse(event.message || "{}");
       if (event.id === "sqlite:sync_complete") {
@@ -91,13 +148,14 @@ try {
             protocol: Number(payload.protocol || 0),
             entryCount: Number(payload.entryCount || 0),
           });
+          globalThis.__sqlite_flush_pending_v3__(addonKey);
         }
         return;
       }
       if (event.id === "sqlite:load_chunk") {
         const count = Number(payload.chunkCount);
         const index = Number(payload.chunkIndex);
-        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 128 || !Number.isInteger(index) || index < 0 || index >= count) return;
+        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 4096 || !Number.isInteger(index) || index < 0 || index >= count) return;
         const chunkKey = String(payload.chunkId);
         let state = globalThis.__sqlite_chunk_store_v2__.get(chunkKey);
         if (!state || state.count !== count) {
@@ -132,6 +190,17 @@ system.runTimeout(() => {
     if (!state || Number(state.protocol || 0) < 3) globalThis.__sqlite_request_sync_v3__("crates_addon", 1);
   } catch (e) {}
 }, 120);
+system.runTimeout(() => {
+  // Sin demonio (mundo importado sin bridge) se opera en modo degradado tras ~10s: RAM es la fuente de verdad.
+  try {
+    const state = globalThis.__sqlite_sync_status_v3__.get("crates_addon");
+    if (state && !state.complete) {
+      state.degraded = true;
+      globalThis.__sqlite_sync_complete_v2__.set("crates_addon", Date.now());
+      globalThis.__sqlite_flush_pending_v3__("crates_addon");
+    }
+  } catch (e) {}
+}, 200);
 // === FIN PERSISTENCIA SQLITE PUENTE V3 ===
 console.warn("Crates Addon iniciado.");
 const COMMAND_NAMESPACE = "s";
@@ -173,9 +242,35 @@ function getValidKeyId(item) {
   }
 }
 
+// Historial de llaves canjadas con TTL: cada llave consumida dejaba un registro
+// permanente en SQLite. Ahora se fecha el canje y un índice acotado permite
+// purgar los registros viejos. La llave física se consume al abrir la caja, por
+// lo que un horizonte de 90 días no habilita reutilización en el flujo normal.
+const USED_KEY_INDEX_KEY = "crates_used_keys_index_v1";
+const USED_KEY_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const USED_KEY_INDEX_LIMIT = 20000;
+const USED_KEY_PURGE_INTERVAL_TICKS = 12000;
+
+function getUsedKeyIndex() {
+  const raw = globalThis.__sqlite_get_prop_v2__("crates_addon", "world", USED_KEY_INDEX_KEY);
+  const parsed = globalThis.__sqlite_read_json_v3__(raw, {});
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+}
+
 function isKeyRedeemed(keyId) {
   try {
-    return globalThis.__sqlite_get_prop_v2__("crates_addon", "world", `${USED_KEY_PREFIX}${keyId}`) === true;
+    const raw = globalThis.__sqlite_get_prop_v2__("crates_addon", "world", `${USED_KEY_PREFIX}${keyId}`);
+    if (raw === undefined || raw === null || raw === false) return false;
+    // Legacy: los registros previos al TTL guardaban `true` sin fecha; se datan
+    // al leerlos para que la purga programada pueda alcanzarlos.
+    if (raw === true) {
+      const now = Date.now();
+      globalThis.__sqlite_set_prop_v2__("crates_addon", "world", `${USED_KEY_PREFIX}${keyId}`, now);
+      const index = getUsedKeyIndex();
+      index[keyId] = now;
+      globalThis.__sqlite_set_prop_v2__("crates_addon", "world", USED_KEY_INDEX_KEY, JSON.stringify(index));
+    }
+    return true;
   } catch (e) {
     return true;
   }
@@ -183,13 +278,46 @@ function isKeyRedeemed(keyId) {
 
 function setKeyRedeemed(keyId, redeemed) {
   try {
-    globalThis.__sqlite_set_prop_v2__("crates_addon", "world", `${USED_KEY_PREFIX}${keyId}`, redeemed ? true : undefined);
+    const now = Date.now();
+    globalThis.__sqlite_set_prop_v2__("crates_addon", "world", `${USED_KEY_PREFIX}${keyId}`, redeemed ? now : undefined);
+    const index = getUsedKeyIndex();
+    if (redeemed) index[keyId] = now;
+    else delete index[keyId];
+    globalThis.__sqlite_set_prop_v2__("crates_addon", "world", USED_KEY_INDEX_KEY, JSON.stringify(index));
     return true;
   } catch (e) {
     ErrorReporter.report(e, { addonId: "crates_addon", moduleId: "main.js", operation: "key_redemption", category: "runtime" });
     return false;
   }
 }
+
+function purgeRedeemedKeys() {
+  try {
+    const index = getUsedKeyIndex();
+    const now = Date.now();
+    let changed = false;
+    for (const keyId of Object.keys(index)) {
+      if (now - (Number(index[keyId]) || 0) >= USED_KEY_TTL_MS) {
+        globalThis.__sqlite_set_prop_v2__("crates_addon", "world", `${USED_KEY_PREFIX}${keyId}`, undefined);
+        delete index[keyId];
+        changed = true;
+      }
+    }
+    const entries = Object.entries(index);
+    if (entries.length > USED_KEY_INDEX_LIMIT) {
+      entries.sort((a, b) => (Number(a[1]) || 0) - (Number(b[1]) || 0));
+      for (const [keyId] of entries.slice(0, entries.length - USED_KEY_INDEX_LIMIT)) {
+        globalThis.__sqlite_set_prop_v2__("crates_addon", "world", `${USED_KEY_PREFIX}${keyId}`, undefined);
+        delete index[keyId];
+        changed = true;
+      }
+    }
+    if (changed) globalThis.__sqlite_set_prop_v2__("crates_addon", "world", USED_KEY_INDEX_KEY, JSON.stringify(index));
+  } catch (e) {
+    ErrorReporter.report(e, { addonId: "crates_addon", moduleId: "main.js", operation: "purgeRedeemedKeys", category: "runtime" });
+  }
+}
+system.runInterval(purgeRedeemedKeys, USED_KEY_PURGE_INTERVAL_TICKS);
 
 function commandOk(message) {
   return { status: CustomCommandStatus.Success, message };
@@ -218,13 +346,38 @@ function safeOpenForm(player, form, onSelect, onCancel = undefined, retryCount =
   });
 }
 
-// Obtener lista de Cajas de Botín registradas
+// Obtener lista de Cajas de Botín registradas.
+// Caché de identidad + índice de coordenadas: playerInteractWithBlock se dispara
+// con CADA clic en cualquier bloque; mientras el store no cambie, la lista se
+// sirve desde RAM sin deserializar. setcrate acepta cualquier tipo de bloque,
+// así que el filtro estricto es la pertenencia al índice de coordenadas.
+let cratesListRaw;
+let cratesListCache = [];
+let cratesIndexCache = new Set();
+
+function crateCoordinateKey(dimensionId, x, y, z) {
+  return `${dimensionId}:${x}:${y}:${z}`;
+}
+
+function rebuildCratesIndex(list) {
+  const index = new Set();
+  for (const crate of list) {
+    if (crate && Number.isFinite(crate.x) && Number.isFinite(crate.y) && Number.isFinite(crate.z) && crate.dimension) {
+      index.add(crateCoordinateKey(crate.dimension, crate.x, crate.y, crate.z));
+    }
+  }
+  return index;
+}
+
 function getCratesList() {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("crates_addon", "world", "crates_locations");
-    if (raw && typeof raw === "string") {
-      return JSON.parse(raw);
-    }
+    if (raw === cratesListRaw) return cratesListCache;
+    const parsed = globalThis.__sqlite_read_json_v3__(raw, []);
+    cratesListRaw = raw;
+    cratesListCache = Array.isArray(parsed) ? parsed : [];
+    cratesIndexCache = rebuildCratesIndex(cratesListCache);
+    return cratesListCache;
   } catch (e) { ErrorReporter.report(e, { addonId: "crates_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
     console.warn(`[Crates Addon] Error leyendo lista de crates: ${e}`);
   }
@@ -234,7 +387,11 @@ function getCratesList() {
 // Guardar lista de Cajas de Botín
 function saveCratesList(list) {
   try {
-    globalThis.__sqlite_set_prop_v2__("crates_addon", "world", "crates_locations", JSON.stringify(list));
+    const raw = JSON.stringify(list);
+    globalThis.__sqlite_set_prop_v2__("crates_addon", "world", "crates_locations", raw);
+    cratesListRaw = raw;
+    cratesListCache = list;
+    cratesIndexCache = rebuildCratesIndex(list);
   } catch (e) { ErrorReporter.report(e, { addonId: "crates_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
     console.warn(`[Crates Addon] Error guardando lista de crates: ${e}`);
   }
@@ -378,7 +535,11 @@ registerCustomCommands();
 
 // Verificar si un bloque es una Caja de Botín
 function getCrateAt(blockLoc, dimensionId) {
+  // Pre-filtro estricto O(1): sin cajas registradas o con una coordenada fuera
+  // del índice, el clic en un bloque común sale sin parsear ni recorrer nada.
   const list = getCratesList();
+  if (!list.length) return undefined;
+  if (!cratesIndexCache.has(crateCoordinateKey(dimensionId, blockLoc.x, blockLoc.y, blockLoc.z))) return undefined;
   return list.find(c => c.x === blockLoc.x && c.y === blockLoc.y && c.z === blockLoc.z && c.dimension === dimensionId);
 }
 
@@ -392,7 +553,7 @@ function getEmissionBudget(player) {
       if (storedDay !== -1) return { day, earned: 0 };
       const raw = globalThis.__sqlite_get_prop_v2__("crates_addon", player, "economy_emission_budget_v1");
       if (!raw) return { day, earned: 0 };
-      const legacy = JSON.parse(String(raw));
+      const legacy = globalThis.__sqlite_read_json_v3__(raw);
       const legacyEarned = Number(legacy?.earned);
       if (Number(legacy?.day) !== day || !Number.isSafeInteger(legacyEarned) || legacyEarned < 0 || legacyEarned > ECONOMY_DAILY_EMISSION_LIMIT) return null;
       dayObjective.setScore(player, day);

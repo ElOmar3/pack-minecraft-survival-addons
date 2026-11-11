@@ -8,6 +8,9 @@ import { CommandPermissionLevel, CustomCommandStatus, world, system } from "@min
 
 // === PERSISTENCIA SQLITE PUENTE V3 (SEGURO PARA /reload) ===
 if (!globalThis.__sqlite_store_v2__) globalThis.__sqlite_store_v2__ = new Map();
+if (!globalThis.__sqlite_write_ts_v3__) globalThis.__sqlite_write_ts_v3__ = new Map();
+if (!globalThis.__sqlite_pending_v3__) globalThis.__sqlite_pending_v3__ = new Map();
+if (!globalThis.__sqlite_unflushed_v3__) globalThis.__sqlite_unflushed_v3__ = new Map();
 if (!globalThis.__sqlite_owner_key_v2__) {
   globalThis.__sqlite_owner_key_v2__ = function(owner) {
     if (typeof owner === "string") return owner;
@@ -25,6 +28,18 @@ if (!globalThis.__sqlite_get_prop_v2__) {
     return ownerStore ? ownerStore[key] : undefined;
   };
 }
+// Lector tolerante: el demonio rehidrata objetos ya parseados; los datos legacy son strings JSON.
+if (!globalThis.__sqlite_read_json_v3__) {
+  globalThis.__sqlite_read_json_v3__ = function(raw, fallback) {
+    const fb = fallback === undefined ? null : fallback;
+    if (raw === undefined || raw === null) return fb;
+    if (typeof raw === "object") return raw;
+    if (typeof raw !== "string") return raw;
+    const text = raw.trim();
+    if (!text) return fb;
+    try { return JSON.parse(text); } catch (e) { return fb; }
+  };
+}
 if (!globalThis.__sqlite_set_prop_v2__) {
   globalThis.__sqlite_set_prop_v2__ = function(addon, owner, key, value) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
@@ -37,7 +52,21 @@ if (!globalThis.__sqlite_set_prop_v2__) {
     const payload = { addon: addonKey, owner: ownerKey, key };
     if (value === undefined) { delete ownerStore[key]; payload.deleted = true; }
     else { ownerStore[key] = value; payload.deleted = false; payload.value = value; }
-    try { console.warn("[SQLITE_SAVE_V1] " + JSON.stringify(payload)); } catch (e) {}
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    globalThis.__sqlite_write_ts_v3__.set(compositeKey, Date.now());
+    try {
+      const line = "[SQLITE_SAVE_V1] " + JSON.stringify(payload);
+      // Gating: las escrituras previas a sync_complete se encolan y se emiten al confirmar el snapshot.
+      if (globalThis.__sqlite_is_ready_v3__(addonKey)) console.warn(line);
+      else {
+        let queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+        if (!queue) { queue = []; globalThis.__sqlite_pending_v3__.set(addonKey, queue); }
+        queue.push(line);
+        let marks = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+        if (!marks) { marks = new Set(); globalThis.__sqlite_unflushed_v3__.set(addonKey, marks); }
+        marks.add(compositeKey);
+      }
+    } catch (e) {}
   };
 }
 if (!globalThis.__sqlite_rehydrate_v2__) {
@@ -45,6 +74,13 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
     const addonKey = String(addon);
     const ownerKey = globalThis.__sqlite_owner_key_v2__(owner);
+    // Versionado: una escritura local posterior a la solicitud de sync (o aún no drenada al demonio) gana sobre el snapshot.
+    const status = globalThis.__sqlite_sync_status_v3__.get(addonKey);
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    const writeTs = globalThis.__sqlite_write_ts_v3__.get(compositeKey);
+    const unflushed = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+    if (unflushed && unflushed.has(compositeKey)) return;
+    if (status && status.requestedAt !== undefined && writeTs !== undefined && writeTs >= status.requestedAt) return;
     let addonStore = globalThis.__sqlite_store_v2__.get(addonKey);
     if (!addonStore) { addonStore = new Map(); globalThis.__sqlite_store_v2__.set(addonKey, addonStore); }
     let ownerStore = addonStore.get(ownerKey);
@@ -55,16 +91,35 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
 }
 if (!globalThis.__sqlite_sync_complete_v2__) globalThis.__sqlite_sync_complete_v2__ = new Map();
 if (!globalThis.__sqlite_sync_status_v3__) globalThis.__sqlite_sync_status_v3__ = new Map();
+if (!globalThis.__sqlite_is_ready_v3__) {
+  globalThis.__sqlite_is_ready_v3__ = function(addon) {
+    const status = globalThis.__sqlite_sync_status_v3__.get(String(addon));
+    return Boolean(status && (status.complete || status.degraded));
+  };
+}
+if (!globalThis.__sqlite_flush_pending_v3__) {
+  globalThis.__sqlite_flush_pending_v3__ = function(addon) {
+    const addonKey = String(addon);
+    const queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+    if (!queue || queue.length === 0) return;
+    globalThis.__sqlite_pending_v3__.delete(addonKey);
+    globalThis.__sqlite_unflushed_v3__.delete(addonKey);
+    for (const line of queue) { try { console.warn(line); } catch (e) {} }
+  };
+}
 if (!globalThis.__sqlite_request_sync_v3__) {
   globalThis.__sqlite_request_sync_v3__ = function(addon, attempt) {
     const addonKey = String(addon || "");
     if (!addonKey) return;
     const previous = globalThis.__sqlite_sync_status_v3__.get(addonKey) || {};
+    // Conservar la ventana original en reintentos para que el guard de versión no se relaje.
+    const keepWindow = previous.requestedAt && !previous.complete && !previous.degraded;
     globalThis.__sqlite_sync_status_v3__.set(addonKey, {
       ...previous,
-      requestedAt: Date.now(),
+      requestedAt: keepWindow ? previous.requestedAt : Date.now(),
       attempt: Number(attempt || 0),
       complete: false,
+      degraded: false,
       protocol: 0,
     });
     try { console.warn("[SQLITE_REQUEST_SYNC] " + JSON.stringify({ addon: addonKey, protocol: 3, attempt: Number(attempt || 0) })); } catch (e) {}
@@ -76,6 +131,8 @@ try {
   if (!globalThis.__sqlite_listener_callback_v3__) {
     const callback = function(event) {
     if (!event || (event.id !== "sqlite:load" && event.id !== "sqlite:sync" && event.id !== "sqlite:load_chunk" && event.id !== "sqlite:sync_complete")) return;
+    // Solo el demonio (consola del servidor) puede rehidratar; un jugador jamás debe inyectar estado.
+    if (event.sourceEntity && event.sourceEntity.typeId === "minecraft:player") return;
     try {
       const payload = JSON.parse(event.message || "{}");
       if (event.id === "sqlite:sync_complete") {
@@ -90,13 +147,14 @@ try {
             protocol: Number(payload.protocol || 0),
             entryCount: Number(payload.entryCount || 0),
           });
+          globalThis.__sqlite_flush_pending_v3__(addonKey);
         }
         return;
       }
       if (event.id === "sqlite:load_chunk") {
         const count = Number(payload.chunkCount);
         const index = Number(payload.chunkIndex);
-        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 128 || !Number.isInteger(index) || index < 0 || index >= count) return;
+        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 4096 || !Number.isInteger(index) || index < 0 || index >= count) return;
         const chunkKey = String(payload.chunkId);
         let state = globalThis.__sqlite_chunk_store_v2__.get(chunkKey);
         if (!state || state.count !== count) {
@@ -131,6 +189,17 @@ system.runTimeout(() => {
     if (!state || Number(state.protocol || 0) < 3) globalThis.__sqlite_request_sync_v3__("mining_fever_addon", 1);
   } catch (e) {}
 }, 120);
+system.runTimeout(() => {
+  // Sin demonio (mundo importado sin bridge) se opera en modo degradado tras ~10s: RAM es la fuente de verdad.
+  try {
+    const state = globalThis.__sqlite_sync_status_v3__.get("mining_fever_addon");
+    if (state && !state.complete) {
+      state.degraded = true;
+      globalThis.__sqlite_sync_complete_v2__.set("mining_fever_addon", Date.now());
+      globalThis.__sqlite_flush_pending_v3__("mining_fever_addon");
+    }
+  } catch (e) {}
+}, 200);
 // === FIN PERSISTENCIA SQLITE PUENTE V3 ===
 const COMMAND_NAMESPACE = "s";
 const ADMIN_PERMISSION =
@@ -158,6 +227,14 @@ const MAX_OPERATIONAL_BALANCE = 100000000;
 const ECONOMY_DAILY_EMISSION_LIMIT = 50000;
 const PLACED_ORE_BUCKET_PREFIX = "mining_placed_ore_v2";
 const MAX_TRACKED_ORES_PER_BUCKET = 2048;
+// Techo LRU de la caché RAM y barrido periódico de buckets ociosos: los buckets
+// que quedan vacíos (menas minadas o destruidas por explosiones) se eliminan
+// también de SQLite para que el registro no crezca sin techo.
+const MAX_PLACED_ORE_CACHE_BUCKETS = 256;
+const ORE_SWEEP_INTERVAL_TICKS = 6000;
+const ORE_SWEEP_MAX_BUCKETS = 8;
+const ORE_SWEEP_MAX_POSITIONS = 64;
+const ORE_SWEEP_IDLE_MS = 5 * 60 * 1000;
 const BLOOD_MOON_STATE_PROPERTY = "is_blood_moon";
 const BLOOD_MOON_REWARD_MULTIPLIER = 2;
 const placedOreCache = new Map();
@@ -252,7 +329,7 @@ function hasBloodMoonHuntingBonus(entity) {
       // Ignorar InvalidEntityError, asumimos que estaba en el overworld ya que de ahí provienen las alertas
     }
     if (!inOverworld) return false;
-    return globalThis.__sqlite_get_prop_v2__("mining_fever_addon", "world", BLOOD_MOON_STATE_PROPERTY) === true;
+    return globalThis.__sqlite_get_prop_v2__("blood_moon_addon", "world", BLOOD_MOON_STATE_PROPERTY) === true;
   } catch (e) {
     ErrorReporter.report(e, { addonId: "mining_fever_addon", moduleId: "main.js", operation: "hasBloodMoonHuntingBonus", category: "runtime" });
     return false;
@@ -279,7 +356,7 @@ function getEmissionBudget(player) {
       if (storedDay !== -1) return { day, earned: 0 };
       const raw = globalThis.__sqlite_get_prop_v2__("mining_fever_addon", player, "economy_emission_budget_v1");
       if (!raw) return { day, earned: 0 };
-      const legacy = JSON.parse(String(raw));
+      const legacy = globalThis.__sqlite_read_json_v3__(raw);
       const legacyEarned = Number(legacy?.earned);
       if (Number(legacy?.day) !== day || !Number.isSafeInteger(legacyEarned) || legacyEarned < 0 || legacyEarned > ECONOMY_DAILY_EMISSION_LIMIT) return null;
       dayObjective.setScore(player, day);
@@ -392,11 +469,22 @@ function disablePlacedOreTracking(operation, error) {
   }
 }
 
+function touchPlacedOreBucket(key, bucket) {
+  bucket.lastAccess = Date.now();
+  placedOreCache.delete(key);
+  placedOreCache.set(key, bucket);
+  while (placedOreCache.size > MAX_PLACED_ORE_CACHE_BUCKETS) {
+    placedOreCache.delete(placedOreCache.keys().next().value);
+  }
+  return bucket;
+}
+
 function loadPlacedOreBucket(key) {
-  if (placedOreCache.has(key)) return placedOreCache.get(key);
+  const cached = placedOreCache.get(key);
+  if (cached) return touchPlacedOreBucket(key, cached);
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("mining_fever_addon", "world", key);
-    const parsed = raw ? JSON.parse(String(raw)) : {};
+    const parsed = raw ? globalThis.__sqlite_read_json_v3__(raw) : {};
     if (raw && (typeof parsed !== "object" || parsed === null ||
         (parsed.positions !== undefined && !Array.isArray(parsed.positions)) ||
         (Array.isArray(parsed.positions) && parsed.positions.length > MAX_TRACKED_ORES_PER_BUCKET))) {
@@ -404,13 +492,17 @@ function loadPlacedOreBucket(key) {
     }
     const bucket = {
       overflow: parsed.overflow === true,
-      positions: new Set(Array.isArray(parsed.positions) ? parsed.positions.map(String) : [])
+      positions: new Set(Array.isArray(parsed.positions) ? parsed.positions.map(String) : []),
+      lastAccess: Date.now()
     };
     placedOreCache.set(key, bucket);
+    while (placedOreCache.size > MAX_PLACED_ORE_CACHE_BUCKETS) {
+      placedOreCache.delete(placedOreCache.keys().next().value);
+    }
     return bucket;
   } catch (e) {
     disablePlacedOreTracking("loadPlacedOreBucket", e);
-    const bucket = { overflow: true, positions: new Set() };
+    const bucket = { overflow: true, positions: new Set(), lastAccess: Date.now() };
     placedOreCache.set(key, bucket);
     return bucket;
   }
@@ -460,8 +552,83 @@ function forgetPlacedOre(dimensionId, location) {
   const info = getPlacedOreBucketInfo(dimensionId, location);
   const bucket = loadPlacedOreBucket(info.key);
   if (!placedOreTrackingHealthy || bucket.overflow || !bucket.positions.delete(info.position)) return false;
+  // Bucket vacío: se retira de SQLite y de la caché en lugar de conservar un
+  // registro serializado sin posiciones para siempre.
+  if (bucket.positions.size === 0) {
+    try {
+      globalThis.__sqlite_set_prop_v2__("mining_fever_addon", "world", info.key, undefined);
+      placedOreCache.delete(info.key);
+      return true;
+    } catch (e) {
+      disablePlacedOreTracking("forgetPlacedOre", e);
+      return false;
+    }
+  }
   return savePlacedOreBucket(info.key, bucket);
 }
+
+function decodeSignedBucketPart(part) {
+  const text = String(part || "");
+  const magnitude = parseInt(text.slice(1), 36);
+  if (!Number.isFinite(magnitude)) return NaN;
+  return text.startsWith("n") ? -magnitude : magnitude;
+}
+
+// Barrido acotado: verifica hasta 64 posiciones de hasta 8 buckets ociosos por
+// ciclo. Si el bloque ya no es una mena con recompensa (p. ej. lo destruyó una
+// explosión), la posición se retira; el bucket vacío se elimina de SQLite. Los
+// chunks sin cargar conservan sus registros (criterio conservador anti-exploit).
+function sweepPlacedOreBuckets() {
+  if (!placedOreTrackingHealthy) return;
+  const now = Date.now();
+  let swept = 0;
+  for (const [key, bucket] of [...placedOreCache.entries()]) {
+    if (swept >= ORE_SWEEP_MAX_BUCKETS) break;
+    if (bucket.overflow || bucket.positions.size === 0) continue;
+    if (now - (bucket.lastAccess || 0) < ORE_SWEEP_IDLE_MS) continue;
+    const parts = key.slice(PLACED_ORE_BUCKET_PREFIX.length + 1).split("_");
+    if (parts.length !== 4) continue;
+    const dimensionId = parts[0] === "n" ? "minecraft:nether" : parts[0] === "e" ? "minecraft:the_end" : "minecraft:overworld";
+    const chunkX = decodeSignedBucketPart(parts[1]);
+    const sectionY = decodeSignedBucketPart(parts[2]);
+    const chunkZ = decodeSignedBucketPart(parts[3]);
+    if (![chunkX, sectionY, chunkZ].every(Number.isFinite)) continue;
+    swept++;
+    try {
+      const dimension = world.getDimension(dimensionId);
+      const positions = [...bucket.positions];
+      const start = (bucket.sweepCursor || 0) % positions.length;
+      let removedAny = false;
+      const checks = Math.min(ORE_SWEEP_MAX_POSITIONS, positions.length);
+      for (let i = 0; i < checks; i++) {
+        const position = positions[(start + i) % positions.length];
+        const [localX, localY, localZ] = position.split(".").map(part => parseInt(part, 36));
+        if (![localX, localY, localZ].every(Number.isFinite)) {
+          bucket.positions.delete(position);
+          removedAny = true;
+          continue;
+        }
+        const block = dimension.getBlock({ x: chunkX * 16 + localX, y: sectionY * 8 + localY, z: chunkZ * 16 + localZ });
+        if (!block) continue;
+        if (ORE_REWARDS[block.typeId] === undefined) {
+          bucket.positions.delete(position);
+          removedAny = true;
+        }
+      }
+      bucket.sweepCursor = (start + checks) % Math.max(1, bucket.positions.size);
+      if (!removedAny) continue;
+      if (bucket.positions.size === 0) {
+        globalThis.__sqlite_set_prop_v2__("mining_fever_addon", "world", key, undefined);
+        placedOreCache.delete(key);
+      } else {
+        savePlacedOreBucket(key, bucket);
+      }
+    } catch (e) {
+      disablePlacedOreTracking("sweepPlacedOreBuckets", e);
+    }
+  }
+}
+system.runInterval(sweepPlacedOreBuckets, ORE_SWEEP_INTERVAL_TICKS);
 
 function loadIncomeLimit(player) {
   try {
