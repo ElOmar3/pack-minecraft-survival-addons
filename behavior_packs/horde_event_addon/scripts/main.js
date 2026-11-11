@@ -9,6 +9,9 @@ import { ActionFormData, ModalFormData } from "@minecraft/server-ui";
 
 // === PERSISTENCIA SQLITE PUENTE V3 (SEGURO PARA /reload) ===
 if (!globalThis.__sqlite_store_v2__) globalThis.__sqlite_store_v2__ = new Map();
+if (!globalThis.__sqlite_write_ts_v3__) globalThis.__sqlite_write_ts_v3__ = new Map();
+if (!globalThis.__sqlite_pending_v3__) globalThis.__sqlite_pending_v3__ = new Map();
+if (!globalThis.__sqlite_unflushed_v3__) globalThis.__sqlite_unflushed_v3__ = new Map();
 if (!globalThis.__sqlite_owner_key_v2__) {
   globalThis.__sqlite_owner_key_v2__ = function(owner) {
     if (typeof owner === "string") return owner;
@@ -26,6 +29,18 @@ if (!globalThis.__sqlite_get_prop_v2__) {
     return ownerStore ? ownerStore[key] : undefined;
   };
 }
+// Lector tolerante: el demonio rehidrata objetos ya parseados; los datos legacy son strings JSON.
+if (!globalThis.__sqlite_read_json_v3__) {
+  globalThis.__sqlite_read_json_v3__ = function(raw, fallback) {
+    const fb = fallback === undefined ? null : fallback;
+    if (raw === undefined || raw === null) return fb;
+    if (typeof raw === "object") return raw;
+    if (typeof raw !== "string") return raw;
+    const text = raw.trim();
+    if (!text) return fb;
+    try { return JSON.parse(text); } catch (e) { return fb; }
+  };
+}
 if (!globalThis.__sqlite_set_prop_v2__) {
   globalThis.__sqlite_set_prop_v2__ = function(addon, owner, key, value) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
@@ -38,7 +53,21 @@ if (!globalThis.__sqlite_set_prop_v2__) {
     const payload = { addon: addonKey, owner: ownerKey, key };
     if (value === undefined) { delete ownerStore[key]; payload.deleted = true; }
     else { ownerStore[key] = value; payload.deleted = false; payload.value = value; }
-    try { console.warn("[SQLITE_SAVE_V1] " + JSON.stringify(payload)); } catch (e) {}
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    globalThis.__sqlite_write_ts_v3__.set(compositeKey, Date.now());
+    try {
+      const line = "[SQLITE_SAVE_V1] " + JSON.stringify(payload);
+      // Gating: las escrituras previas a sync_complete se encolan y se emiten al confirmar el snapshot.
+      if (globalThis.__sqlite_is_ready_v3__(addonKey)) console.warn(line);
+      else {
+        let queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+        if (!queue) { queue = []; globalThis.__sqlite_pending_v3__.set(addonKey, queue); }
+        queue.push(line);
+        let marks = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+        if (!marks) { marks = new Set(); globalThis.__sqlite_unflushed_v3__.set(addonKey, marks); }
+        marks.add(compositeKey);
+      }
+    } catch (e) {}
   };
 }
 if (!globalThis.__sqlite_rehydrate_v2__) {
@@ -46,6 +75,13 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
     const addonKey = String(addon);
     const ownerKey = globalThis.__sqlite_owner_key_v2__(owner);
+    // Versionado: una escritura local posterior a la solicitud de sync (o aún no drenada al demonio) gana sobre el snapshot.
+    const status = globalThis.__sqlite_sync_status_v3__.get(addonKey);
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    const writeTs = globalThis.__sqlite_write_ts_v3__.get(compositeKey);
+    const unflushed = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+    if (unflushed && unflushed.has(compositeKey)) return;
+    if (status && status.requestedAt !== undefined && writeTs !== undefined && writeTs >= status.requestedAt) return;
     let addonStore = globalThis.__sqlite_store_v2__.get(addonKey);
     if (!addonStore) { addonStore = new Map(); globalThis.__sqlite_store_v2__.set(addonKey, addonStore); }
     let ownerStore = addonStore.get(ownerKey);
@@ -56,16 +92,35 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
 }
 if (!globalThis.__sqlite_sync_complete_v2__) globalThis.__sqlite_sync_complete_v2__ = new Map();
 if (!globalThis.__sqlite_sync_status_v3__) globalThis.__sqlite_sync_status_v3__ = new Map();
+if (!globalThis.__sqlite_is_ready_v3__) {
+  globalThis.__sqlite_is_ready_v3__ = function(addon) {
+    const status = globalThis.__sqlite_sync_status_v3__.get(String(addon));
+    return Boolean(status && (status.complete || status.degraded));
+  };
+}
+if (!globalThis.__sqlite_flush_pending_v3__) {
+  globalThis.__sqlite_flush_pending_v3__ = function(addon) {
+    const addonKey = String(addon);
+    const queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+    if (!queue || queue.length === 0) return;
+    globalThis.__sqlite_pending_v3__.delete(addonKey);
+    globalThis.__sqlite_unflushed_v3__.delete(addonKey);
+    for (const line of queue) { try { console.warn(line); } catch (e) {} }
+  };
+}
 if (!globalThis.__sqlite_request_sync_v3__) {
   globalThis.__sqlite_request_sync_v3__ = function(addon, attempt) {
     const addonKey = String(addon || "");
     if (!addonKey) return;
     const previous = globalThis.__sqlite_sync_status_v3__.get(addonKey) || {};
+    // Conservar la ventana original en reintentos para que el guard de versión no se relaje.
+    const keepWindow = previous.requestedAt && !previous.complete && !previous.degraded;
     globalThis.__sqlite_sync_status_v3__.set(addonKey, {
       ...previous,
-      requestedAt: Date.now(),
+      requestedAt: keepWindow ? previous.requestedAt : Date.now(),
       attempt: Number(attempt || 0),
       complete: false,
+      degraded: false,
       protocol: 0,
     });
     try { console.warn("[SQLITE_REQUEST_SYNC] " + JSON.stringify({ addon: addonKey, protocol: 3, attempt: Number(attempt || 0) })); } catch (e) {}
@@ -77,6 +132,8 @@ try {
   if (!globalThis.__sqlite_listener_callback_v3__) {
     const callback = function(event) {
     if (!event || (event.id !== "sqlite:load" && event.id !== "sqlite:sync" && event.id !== "sqlite:load_chunk" && event.id !== "sqlite:sync_complete")) return;
+    // Solo el demonio (consola del servidor) puede rehidratar; un jugador jamás debe inyectar estado.
+    if (event.sourceEntity && event.sourceEntity.typeId === "minecraft:player") return;
     try {
       const payload = JSON.parse(event.message || "{}");
       if (event.id === "sqlite:sync_complete") {
@@ -91,13 +148,14 @@ try {
             protocol: Number(payload.protocol || 0),
             entryCount: Number(payload.entryCount || 0),
           });
+          globalThis.__sqlite_flush_pending_v3__(addonKey);
         }
         return;
       }
       if (event.id === "sqlite:load_chunk") {
         const count = Number(payload.chunkCount);
         const index = Number(payload.chunkIndex);
-        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 128 || !Number.isInteger(index) || index < 0 || index >= count) return;
+        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 4096 || !Number.isInteger(index) || index < 0 || index >= count) return;
         const chunkKey = String(payload.chunkId);
         let state = globalThis.__sqlite_chunk_store_v2__.get(chunkKey);
         if (!state || state.count !== count) {
@@ -132,6 +190,17 @@ system.runTimeout(() => {
     if (!state || Number(state.protocol || 0) < 3) globalThis.__sqlite_request_sync_v3__("horde_event_addon", 1);
   } catch (e) {}
 }, 120);
+system.runTimeout(() => {
+  // Sin demonio (mundo importado sin bridge) se opera en modo degradado tras ~10s: RAM es la fuente de verdad.
+  try {
+    const state = globalThis.__sqlite_sync_status_v3__.get("horde_event_addon");
+    if (state && !state.complete) {
+      state.degraded = true;
+      globalThis.__sqlite_sync_complete_v2__.set("horde_event_addon", Date.now());
+      globalThis.__sqlite_flush_pending_v3__("horde_event_addon");
+    }
+  } catch (e) {}
+}, 200);
 // === FIN PERSISTENCIA SQLITE PUENTE V3 ===
 const COMMAND_NAMESPACE = "s";
 const PREFIX = "§b§l[§3Horda§b§l]§r";
@@ -164,6 +233,10 @@ const HORDE_REWARDS_KEY = "horde_rewards";
 const EXPEDITION_ARENA_KEY = "expedition_arena_v1";
 const EXPEDITION_START_BUTTON_KEY = "expedition_start_button_v1";
 const EXPEDITION_STATE_KEY = "expedition_state_v1";
+// Caché de identidad del estado: entityHurt lo consulta en cada golpe; mientras
+// el valor del puente no cambie se reutiliza el objeto ya normalizado.
+let expeditionStateRaw;
+let expeditionStateCache;
 const EXPEDITION_PENDING_REWARDS_KEY = "expedition_pending_rewards_v1";
 const EXPEDITION_LEADERBOARD_KEY = "expedition_hall_of_fame_v1";
 const EXPEDITION_PLAYER_STATS_KEY = "expedition_stats_v1";
@@ -331,6 +404,11 @@ let activeApocalypse = {
 };
 const expeditionButtonBindRequests = new Map();
 const expeditionDamageBuffer = new Map();
+// Sólo una muerte letal causada por un jugador habilita el botín. El watchdog
+// consume este registro (eventId) para reintentar "defeated" si SQLite no
+// confirmó el cierre; zombificación o despawn cierran la raid sin recompensas.
+let expeditionLethalPlayerKillEventId = "";
+let expeditionBossMissingSince = 0;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -393,16 +471,14 @@ function normalizeReward(reward) {
 
 function getConfiguredRewards() {
   const raw = globalThis.__sqlite_get_prop_v2__("horde_event_addon", "world", HORDE_REWARDS_KEY);
-  if (typeof raw === "string" && raw.trim()) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        const rewards = parsed.map(normalizeReward).filter(Boolean).slice(0, 20);
-        if (rewards.length > 0) return rewards;
-      }
-    } catch (e) {
-      reportRuntimeError(e);
+  try {
+    const parsed = globalThis.__sqlite_read_json_v3__(raw);
+    if (Array.isArray(parsed)) {
+      const rewards = parsed.map(normalizeReward).filter(Boolean).slice(0, 20);
+      if (rewards.length > 0) return rewards;
     }
+  } catch (e) {
+    reportRuntimeError(e);
   }
   return DEFAULT_REWARDS.map(reward => ({ ...reward }));
 }
@@ -893,8 +969,7 @@ function showHordeRewardForm(player) {
 function readJsonFromSqlite(owner, key, fallbackValue) {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("horde_event_addon", owner, key);
-    if (typeof raw !== "string" || !raw.trim()) return fallbackValue;
-    return JSON.parse(raw);
+    return globalThis.__sqlite_read_json_v3__(raw, fallbackValue);
   } catch (error) {
     reportRuntimeError(error);
     return fallbackValue;
@@ -1032,10 +1107,16 @@ function isExpeditionBoss(entity, state = getExpeditionState()) {
 }
 
 function getExpeditionState() {
-  const raw = readJsonFromSqlite("world", EXPEDITION_STATE_KEY, getDefaultExpeditionState());
+  const rawValue = globalThis.__sqlite_get_prop_v2__("horde_event_addon", "world", EXPEDITION_STATE_KEY);
+  if (rawValue === expeditionStateRaw && expeditionStateCache) return expeditionStateCache;
+  const raw = globalThis.__sqlite_read_json_v3__(rawValue, undefined);
   const fallback = getDefaultExpeditionState();
-  if (!raw || typeof raw !== "object") return fallback;
-  return {
+  if (!raw || typeof raw !== "object") {
+    expeditionStateRaw = rawValue;
+    expeditionStateCache = fallback;
+    return fallback;
+  }
+  const state = {
     active: raw.active === true,
     eventId: typeof raw.eventId === "string" ? raw.eventId.slice(0, 96) : "",
     bossId: typeof raw.bossId === "string" && getExpeditionBossProfile(raw.bossId) ? raw.bossId : "",
@@ -1065,9 +1146,16 @@ function getExpeditionState() {
         .slice(0, 100)
       : []
   };
+  expeditionStateRaw = rawValue;
+  expeditionStateCache = state;
+  return state;
 }
 
 function saveExpeditionState(state) {
+  // Invalidar antes de escribir: si el puente falla, la siguiente lectura debe
+  // rehidratar el estado persistido y no la mutación local descartada.
+  expeditionStateRaw = undefined;
+  expeditionStateCache = undefined;
   return writeJsonToSqlite("world", EXPEDITION_STATE_KEY, {
     active: state.active === true,
     eventId: String(state.eventId || "").slice(0, 96),
@@ -1506,6 +1594,8 @@ function finishExpedition(reason) {
     world.sendMessage(`§5§l[Expedición]§r §a¡Guardián derrotado! §d${state.participants.length} participante(s) pueden reclamar su recompensa con /s:expedicion.`);
   } else if (reason === "expired") {
     world.sendMessage("§5§l[Expedición]§r §eLa expedición expiró y el Guardián se retiró. No se entregaron recompensas.");
+  } else if (reason === "lost") {
+    world.sendMessage("§5§l[Expedición]§r §eEl Guardián se perdió sin ser derrotado por jugadores. No se entregaron recompensas.");
   } else {
     world.sendMessage("§5§l[Expedición]§r §eLa expedición fue cancelada por un operador. No se entregaron recompensas.");
   }
@@ -1782,7 +1872,10 @@ system.runInterval(processExpeditionCountdown, EXPEDITION_STATUS_INTERVAL_TICKS)
 
 system.runInterval(() => {
   const state = getExpeditionState();
-  if (!state.active) return;
+  if (!state.active) {
+    expeditionBossMissingSince = 0;
+    return;
+  }
   const arena = getExpeditionArena();
   if (!arena) {
     finishExpedition("cancelled");
@@ -1792,9 +1885,22 @@ system.runInterval(() => {
   if (!boss) {
     // Durante un chunk descargado no asumimos que el jefe murió; así no se
     // entregan recompensas erróneas ni se altera el mundo.
-    if (isLocationLoaded(arena.dimension, arena.location)) finishExpedition("defeated");
+    if (!isLocationLoaded(arena.dimension, arena.location)) return;
+    if (expeditionLethalPlayerKillEventId && expeditionLethalPlayerKillEventId === state.eventId) {
+      finishExpedition("defeated");
+      return;
+    }
+    // Margen para que entityDie registre una muerte letal de jugador antes de
+    // concluir que el jefe se perdió (zombificación de hoglin/piglin brute o
+    // despawn natural en el Overworld). Sin kill de jugador no hay botín.
+    if (!expeditionBossMissingSince) {
+      expeditionBossMissingSince = Date.now();
+      return;
+    }
+    if (Date.now() - expeditionBossMissingSince >= 2000) finishExpedition("lost");
     return;
   }
+  expeditionBossMissingSince = 0;
   if (Date.now() - state.startedAt >= EXPEDITION_DURATION_MS) {
     try { boss.remove(); } catch (error) { reportRuntimeError(error); }
     finishExpedition("expired");
@@ -1821,8 +1927,19 @@ world.afterEvents.entityDie.subscribe((event) => {
       return;
     }
     if (!isExpeditionBoss(entity)) return;
+    let playerKill = false;
+    try {
+      const killer = event.damageSource?.damagingEntity;
+      playerKill = Boolean(killer && killer.typeId === "minecraft:player");
+    } catch (error) {}
     flushExpeditionContributionBuffer();
-    finishExpedition("defeated");
+    if (playerKill) {
+      expeditionLethalPlayerKillEventId = getExpeditionState().eventId;
+      finishExpedition("defeated");
+    } else {
+      // Zombificación o muerte ambiental del jefe: se cierra sin recompensas.
+      finishExpedition("lost");
+    }
   } catch (error) {
     reportRuntimeError(error);
   }

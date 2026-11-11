@@ -8,6 +8,9 @@ import { CommandPermissionLevel, CustomCommandParamType, CustomCommandStatus, Pl
 
 // === PERSISTENCIA SQLITE PUENTE V3 (SEGURO PARA /reload) ===
 if (!globalThis.__sqlite_store_v2__) globalThis.__sqlite_store_v2__ = new Map();
+if (!globalThis.__sqlite_write_ts_v3__) globalThis.__sqlite_write_ts_v3__ = new Map();
+if (!globalThis.__sqlite_pending_v3__) globalThis.__sqlite_pending_v3__ = new Map();
+if (!globalThis.__sqlite_unflushed_v3__) globalThis.__sqlite_unflushed_v3__ = new Map();
 if (!globalThis.__sqlite_owner_key_v2__) {
   globalThis.__sqlite_owner_key_v2__ = function(owner) {
     if (typeof owner === "string") return owner;
@@ -25,6 +28,18 @@ if (!globalThis.__sqlite_get_prop_v2__) {
     return ownerStore ? ownerStore[key] : undefined;
   };
 }
+// Lector tolerante: el demonio rehidrata objetos ya parseados; los datos legacy son strings JSON.
+if (!globalThis.__sqlite_read_json_v3__) {
+  globalThis.__sqlite_read_json_v3__ = function(raw, fallback) {
+    const fb = fallback === undefined ? null : fallback;
+    if (raw === undefined || raw === null) return fb;
+    if (typeof raw === "object") return raw;
+    if (typeof raw !== "string") return raw;
+    const text = raw.trim();
+    if (!text) return fb;
+    try { return JSON.parse(text); } catch (e) { return fb; }
+  };
+}
 if (!globalThis.__sqlite_set_prop_v2__) {
   globalThis.__sqlite_set_prop_v2__ = function(addon, owner, key, value) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
@@ -37,7 +52,21 @@ if (!globalThis.__sqlite_set_prop_v2__) {
     const payload = { addon: addonKey, owner: ownerKey, key };
     if (value === undefined) { delete ownerStore[key]; payload.deleted = true; }
     else { ownerStore[key] = value; payload.deleted = false; payload.value = value; }
-    try { console.warn("[SQLITE_SAVE_V1] " + JSON.stringify(payload)); } catch (e) {}
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    globalThis.__sqlite_write_ts_v3__.set(compositeKey, Date.now());
+    try {
+      const line = "[SQLITE_SAVE_V1] " + JSON.stringify(payload);
+      // Gating: las escrituras previas a sync_complete se encolan y se emiten al confirmar el snapshot.
+      if (globalThis.__sqlite_is_ready_v3__(addonKey)) console.warn(line);
+      else {
+        let queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+        if (!queue) { queue = []; globalThis.__sqlite_pending_v3__.set(addonKey, queue); }
+        queue.push(line);
+        let marks = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+        if (!marks) { marks = new Set(); globalThis.__sqlite_unflushed_v3__.set(addonKey, marks); }
+        marks.add(compositeKey);
+      }
+    } catch (e) {}
   };
 }
 if (!globalThis.__sqlite_rehydrate_v2__) {
@@ -45,6 +74,13 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
     const addonKey = String(addon);
     const ownerKey = globalThis.__sqlite_owner_key_v2__(owner);
+    // Versionado: una escritura local posterior a la solicitud de sync (o aún no drenada al demonio) gana sobre el snapshot.
+    const status = globalThis.__sqlite_sync_status_v3__.get(addonKey);
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    const writeTs = globalThis.__sqlite_write_ts_v3__.get(compositeKey);
+    const unflushed = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+    if (unflushed && unflushed.has(compositeKey)) return;
+    if (status && status.requestedAt !== undefined && writeTs !== undefined && writeTs >= status.requestedAt) return;
     let addonStore = globalThis.__sqlite_store_v2__.get(addonKey);
     if (!addonStore) { addonStore = new Map(); globalThis.__sqlite_store_v2__.set(addonKey, addonStore); }
     let ownerStore = addonStore.get(ownerKey);
@@ -55,16 +91,35 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
 }
 if (!globalThis.__sqlite_sync_complete_v2__) globalThis.__sqlite_sync_complete_v2__ = new Map();
 if (!globalThis.__sqlite_sync_status_v3__) globalThis.__sqlite_sync_status_v3__ = new Map();
+if (!globalThis.__sqlite_is_ready_v3__) {
+  globalThis.__sqlite_is_ready_v3__ = function(addon) {
+    const status = globalThis.__sqlite_sync_status_v3__.get(String(addon));
+    return Boolean(status && (status.complete || status.degraded));
+  };
+}
+if (!globalThis.__sqlite_flush_pending_v3__) {
+  globalThis.__sqlite_flush_pending_v3__ = function(addon) {
+    const addonKey = String(addon);
+    const queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+    if (!queue || queue.length === 0) return;
+    globalThis.__sqlite_pending_v3__.delete(addonKey);
+    globalThis.__sqlite_unflushed_v3__.delete(addonKey);
+    for (const line of queue) { try { console.warn(line); } catch (e) {} }
+  };
+}
 if (!globalThis.__sqlite_request_sync_v3__) {
   globalThis.__sqlite_request_sync_v3__ = function(addon, attempt) {
     const addonKey = String(addon || "");
     if (!addonKey) return;
     const previous = globalThis.__sqlite_sync_status_v3__.get(addonKey) || {};
+    // Conservar la ventana original en reintentos para que el guard de versión no se relaje.
+    const keepWindow = previous.requestedAt && !previous.complete && !previous.degraded;
     globalThis.__sqlite_sync_status_v3__.set(addonKey, {
       ...previous,
-      requestedAt: Date.now(),
+      requestedAt: keepWindow ? previous.requestedAt : Date.now(),
       attempt: Number(attempt || 0),
       complete: false,
+      degraded: false,
       protocol: 0,
     });
     try { console.warn("[SQLITE_REQUEST_SYNC] " + JSON.stringify({ addon: addonKey, protocol: 3, attempt: Number(attempt || 0) })); } catch (e) {}
@@ -76,6 +131,7 @@ try {
   if (!globalThis.__sqlite_listener_callback_v3__) {
     const callback = function(event) {
     if (!event || (event.id !== "sqlite:load" && event.id !== "sqlite:sync" && event.id !== "sqlite:load_chunk" && event.id !== "sqlite:sync_complete")) return;
+    // Solo el demonio (consola del servidor) puede rehidratar; un jugador jamás debe inyectar estado.
     if (event.sourceEntity && event.sourceEntity.typeId === "minecraft:player") return;
     try {
       const payload = JSON.parse(event.message || "{}");
@@ -91,13 +147,14 @@ try {
             protocol: Number(payload.protocol || 0),
             entryCount: Number(payload.entryCount || 0),
           });
+          globalThis.__sqlite_flush_pending_v3__(addonKey);
         }
         return;
       }
       if (event.id === "sqlite:load_chunk") {
         const count = Number(payload.chunkCount);
         const index = Number(payload.chunkIndex);
-        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 128 || !Number.isInteger(index) || index < 0 || index >= count) return;
+        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 4096 || !Number.isInteger(index) || index < 0 || index >= count) return;
         const chunkKey = String(payload.chunkId);
         let state = globalThis.__sqlite_chunk_store_v2__.get(chunkKey);
         if (!state || state.count !== count) {
@@ -132,6 +189,17 @@ system.runTimeout(() => {
     if (!state || Number(state.protocol || 0) < 3) globalThis.__sqlite_request_sync_v3__("clans_addon", 1);
   } catch (e) {}
 }, 120);
+system.runTimeout(() => {
+  // Sin demonio (mundo importado sin bridge) se opera en modo degradado tras ~10s: RAM es la fuente de verdad.
+  try {
+    const state = globalThis.__sqlite_sync_status_v3__.get("clans_addon");
+    if (state && !state.complete) {
+      state.degraded = true;
+      globalThis.__sqlite_sync_complete_v2__.set("clans_addon", Date.now());
+      globalThis.__sqlite_flush_pending_v3__("clans_addon");
+    }
+  } catch (e) {}
+}, 200);
 // === FIN PERSISTENCIA SQLITE PUENTE V3 ===
 
 // ============================================================================
@@ -150,7 +218,10 @@ function getClanLevel(clan) {
 }
 
 function handleClanUpgrade(player, clan, clanKey) {
-  if (clan.leader.toLowerCase() !== player.name.toLowerCase()) {
+  // El liderazgo se persiste como clan.owner en todo el addon; se acepta el
+  // campo legacy clan.leader como fallback para no lanzar TypeError con datos viejos.
+  const leaderName = String(clan.owner ?? clan.leader ?? "").toLowerCase();
+  if (leaderName !== player.name.toLowerCase()) {
     player.sendMessage("§b§l[§3Clanes§b§l]§r §cSolo el líder del clan puede mejorar el nivel del clan.");
     return;
   }
@@ -248,11 +319,11 @@ const dynamicJsonCache = new Map();
 const pendingAdminClanDissolutions = new Map();
 
 function loadCachedJson(key, fallbackValue) {
-  const raw = String(globalThis.__sqlite_get_prop_v2__("clans_addon", "world", key) || "");
+  const raw = globalThis.__sqlite_get_prop_v2__("clans_addon", "world", key);
   const cached = dynamicJsonCache.get(key);
-  if (cached?.raw === raw) return cached.value;
+  if (cached && cached.raw === raw) return cached.value;
 
-  const value = raw ? JSON.parse(raw) : fallbackValue;
+  const value = globalThis.__sqlite_read_json_v3__(raw, fallbackValue);
   dynamicJsonCache.set(key, { raw, value });
   return value;
 }
@@ -428,7 +499,7 @@ function addBalance(playerOrName, amount) {
 function getBountyEarnings(player) {
   const day = Math.floor(Date.now() / 86400000);
   try {
-    const parsed = JSON.parse(String(globalThis.__sqlite_get_prop_v2__("clans_addon", player, BOUNTY_EARNINGS_PROPERTY) || "{}"));
+    const parsed = globalThis.__sqlite_read_json_v3__(globalThis.__sqlite_get_prop_v2__("clans_addon", player, BOUNTY_EARNINGS_PROPERTY) || "{}");
     if (Number(parsed.day) !== day) return { day, earned: 0 };
     return { day, earned: Math.max(0, Math.floor(Number(parsed.earned) || 0)) };
   } catch (e) {
@@ -446,7 +517,7 @@ function getEmissionBudget(player) {
       if (storedDay !== -1) return { day, earned: 0 };
       const raw = globalThis.__sqlite_get_prop_v2__("clans_addon", player, "economy_emission_budget_v1");
       if (!raw) return { day, earned: 0 };
-      const legacy = JSON.parse(String(raw));
+      const legacy = globalThis.__sqlite_read_json_v3__(raw);
       const legacyEarned = Number(legacy?.earned);
       if (Number(legacy?.day) !== day || !Number.isSafeInteger(legacyEarned) || legacyEarned < 0 || legacyEarned > ECONOMY_DAILY_EMISSION_LIMIT) return null;
       dayObjective.setScore(player, day);
@@ -2470,6 +2541,49 @@ system.afterEvents.scriptEventReceive.subscribe((event) => {
   }
 });
 
+// Anti-farm de banco: un jugador no debe poder colocar y romper el mismo bloque
+// para progresar misiones cooperativas e inflar la tesorería del clan. Se registran
+// los bloques colocados por jugadores (buffer acotado en RAM) y se descartan al
+// romperse, de modo que solo la minería de recursos naturales cuenta para la misión.
+const PLACED_BLOCK_TRACKER_LIMIT = 4096;
+const placedBlockTracker = new Map();
+
+function blockPositionKey(dimensionId, block) {
+  return `${dimensionId}:${Math.floor(block.x)}:${Math.floor(block.y)}:${Math.floor(block.z)}`;
+}
+
+function trackPlacedBlock(dimensionId, block) {
+  const key = blockPositionKey(dimensionId, block);
+  if (placedBlockTracker.has(key)) placedBlockTracker.delete(key);
+  placedBlockTracker.set(key, Date.now());
+  while (placedBlockTracker.size > PLACED_BLOCK_TRACKER_LIMIT) {
+    placedBlockTracker.delete(placedBlockTracker.keys().next().value);
+  }
+}
+
+function consumePlacedBlock(dimensionId, block) {
+  const key = blockPositionKey(dimensionId, block);
+  if (!placedBlockTracker.has(key)) return false;
+  placedBlockTracker.delete(key);
+  return true;
+}
+
+try {
+  world.afterEvents.playerPlaceBlock.subscribe((event) => {
+    try {
+      const block = event.block;
+      if (!block) return;
+      const dimensionId = event.dimension?.id || block.dimension?.id || event.player?.dimension?.id;
+      if (!dimensionId) return;
+      trackPlacedBlock(dimensionId, block);
+    } catch (e) {
+      ErrorReporter.report(e, { addonId: "clans_addon", moduleId: "main.js", operation: "quest_place_block", category: "runtime" });
+    }
+  });
+} catch (e) {
+  console.warn("[Clans Addon] Error al registrar playerPlaceBlock para anti-farm: " + e);
+}
+
 // Progresar misiones de clan al romper bloques
 try {
   world.afterEvents.playerBreakBlock.subscribe((event) => {
@@ -2482,6 +2596,11 @@ try {
       const db = loadClansData();
       const clan = db[clanKey];
       if (!clan || !clan.quest || !clan.quest.active) return;
+
+      const dimensionId = event.dimension?.id || event.block?.dimension?.id || player.dimension?.id;
+      if (event.block && dimensionId && consumePlacedBlock(dimensionId, event.block)) {
+        return; // Bloque colocado por un jugador: no progresa la misión (anti-farm).
+      }
 
       const blockTypeId = event.brokenBlockPermutation.type.id;
       let progressed = false;

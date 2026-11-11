@@ -9,6 +9,9 @@ import { ActionFormData, ModalFormData, MessageFormData } from "@minecraft/serve
 
 // === PERSISTENCIA SQLITE PUENTE V3 (SEGURO PARA /reload) ===
 if (!globalThis.__sqlite_store_v2__) globalThis.__sqlite_store_v2__ = new Map();
+if (!globalThis.__sqlite_write_ts_v3__) globalThis.__sqlite_write_ts_v3__ = new Map();
+if (!globalThis.__sqlite_pending_v3__) globalThis.__sqlite_pending_v3__ = new Map();
+if (!globalThis.__sqlite_unflushed_v3__) globalThis.__sqlite_unflushed_v3__ = new Map();
 if (!globalThis.__sqlite_owner_key_v2__) {
   globalThis.__sqlite_owner_key_v2__ = function(owner) {
     if (typeof owner === "string") return owner;
@@ -26,6 +29,18 @@ if (!globalThis.__sqlite_get_prop_v2__) {
     return ownerStore ? ownerStore[key] : undefined;
   };
 }
+// Lector tolerante: el demonio rehidrata objetos ya parseados; los datos legacy son strings JSON.
+if (!globalThis.__sqlite_read_json_v3__) {
+  globalThis.__sqlite_read_json_v3__ = function(raw, fallback) {
+    const fb = fallback === undefined ? null : fallback;
+    if (raw === undefined || raw === null) return fb;
+    if (typeof raw === "object") return raw;
+    if (typeof raw !== "string") return raw;
+    const text = raw.trim();
+    if (!text) return fb;
+    try { return JSON.parse(text); } catch (e) { return fb; }
+  };
+}
 if (!globalThis.__sqlite_set_prop_v2__) {
   globalThis.__sqlite_set_prop_v2__ = function(addon, owner, key, value) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
@@ -38,7 +53,21 @@ if (!globalThis.__sqlite_set_prop_v2__) {
     const payload = { addon: addonKey, owner: ownerKey, key };
     if (value === undefined) { delete ownerStore[key]; payload.deleted = true; }
     else { ownerStore[key] = value; payload.deleted = false; payload.value = value; }
-    try { console.warn("[SQLITE_SAVE_V1] " + JSON.stringify(payload)); } catch (e) {}
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    globalThis.__sqlite_write_ts_v3__.set(compositeKey, Date.now());
+    try {
+      const line = "[SQLITE_SAVE_V1] " + JSON.stringify(payload);
+      // Gating: las escrituras previas a sync_complete se encolan y se emiten al confirmar el snapshot.
+      if (globalThis.__sqlite_is_ready_v3__(addonKey)) console.warn(line);
+      else {
+        let queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+        if (!queue) { queue = []; globalThis.__sqlite_pending_v3__.set(addonKey, queue); }
+        queue.push(line);
+        let marks = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+        if (!marks) { marks = new Set(); globalThis.__sqlite_unflushed_v3__.set(addonKey, marks); }
+        marks.add(compositeKey);
+      }
+    } catch (e) {}
   };
 }
 if (!globalThis.__sqlite_rehydrate_v2__) {
@@ -46,6 +75,13 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
     const addonKey = String(addon);
     const ownerKey = globalThis.__sqlite_owner_key_v2__(owner);
+    // Versionado: una escritura local posterior a la solicitud de sync (o aún no drenada al demonio) gana sobre el snapshot.
+    const status = globalThis.__sqlite_sync_status_v3__.get(addonKey);
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    const writeTs = globalThis.__sqlite_write_ts_v3__.get(compositeKey);
+    const unflushed = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+    if (unflushed && unflushed.has(compositeKey)) return;
+    if (status && status.requestedAt !== undefined && writeTs !== undefined && writeTs >= status.requestedAt) return;
     let addonStore = globalThis.__sqlite_store_v2__.get(addonKey);
     if (!addonStore) { addonStore = new Map(); globalThis.__sqlite_store_v2__.set(addonKey, addonStore); }
     let ownerStore = addonStore.get(ownerKey);
@@ -56,16 +92,35 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
 }
 if (!globalThis.__sqlite_sync_complete_v2__) globalThis.__sqlite_sync_complete_v2__ = new Map();
 if (!globalThis.__sqlite_sync_status_v3__) globalThis.__sqlite_sync_status_v3__ = new Map();
+if (!globalThis.__sqlite_is_ready_v3__) {
+  globalThis.__sqlite_is_ready_v3__ = function(addon) {
+    const status = globalThis.__sqlite_sync_status_v3__.get(String(addon));
+    return Boolean(status && (status.complete || status.degraded));
+  };
+}
+if (!globalThis.__sqlite_flush_pending_v3__) {
+  globalThis.__sqlite_flush_pending_v3__ = function(addon) {
+    const addonKey = String(addon);
+    const queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+    if (!queue || queue.length === 0) return;
+    globalThis.__sqlite_pending_v3__.delete(addonKey);
+    globalThis.__sqlite_unflushed_v3__.delete(addonKey);
+    for (const line of queue) { try { console.warn(line); } catch (e) {} }
+  };
+}
 if (!globalThis.__sqlite_request_sync_v3__) {
   globalThis.__sqlite_request_sync_v3__ = function(addon, attempt) {
     const addonKey = String(addon || "");
     if (!addonKey) return;
     const previous = globalThis.__sqlite_sync_status_v3__.get(addonKey) || {};
+    // Conservar la ventana original en reintentos para que el guard de versión no se relaje.
+    const keepWindow = previous.requestedAt && !previous.complete && !previous.degraded;
     globalThis.__sqlite_sync_status_v3__.set(addonKey, {
       ...previous,
-      requestedAt: Date.now(),
+      requestedAt: keepWindow ? previous.requestedAt : Date.now(),
       attempt: Number(attempt || 0),
       complete: false,
+      degraded: false,
       protocol: 0,
     });
     try { console.warn("[SQLITE_REQUEST_SYNC] " + JSON.stringify({ addon: addonKey, protocol: 3, attempt: Number(attempt || 0) })); } catch (e) {}
@@ -77,6 +132,8 @@ try {
   if (!globalThis.__sqlite_listener_callback_v3__) {
     const callback = function(event) {
     if (!event || (event.id !== "sqlite:load" && event.id !== "sqlite:sync" && event.id !== "sqlite:load_chunk" && event.id !== "sqlite:sync_complete")) return;
+    // Solo el demonio (consola del servidor) puede rehidratar; un jugador jamás debe inyectar estado.
+    if (event.sourceEntity && event.sourceEntity.typeId === "minecraft:player") return;
     try {
       const payload = JSON.parse(event.message || "{}");
       if (event.id === "sqlite:sync_complete") {
@@ -91,13 +148,14 @@ try {
             protocol: Number(payload.protocol || 0),
             entryCount: Number(payload.entryCount || 0),
           });
+          globalThis.__sqlite_flush_pending_v3__(addonKey);
         }
         return;
       }
       if (event.id === "sqlite:load_chunk") {
         const count = Number(payload.chunkCount);
         const index = Number(payload.chunkIndex);
-        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 128 || !Number.isInteger(index) || index < 0 || index >= count) return;
+        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 4096 || !Number.isInteger(index) || index < 0 || index >= count) return;
         const chunkKey = String(payload.chunkId);
         let state = globalThis.__sqlite_chunk_store_v2__.get(chunkKey);
         if (!state || state.count !== count) {
@@ -132,6 +190,17 @@ system.runTimeout(() => {
     if (!state || Number(state.protocol || 0) < 3) globalThis.__sqlite_request_sync_v3__("shop_addon", 1);
   } catch (e) {}
 }, 120);
+system.runTimeout(() => {
+  // Sin demonio (mundo importado sin bridge) se opera en modo degradado tras ~10s: RAM es la fuente de verdad.
+  try {
+    const state = globalThis.__sqlite_sync_status_v3__.get("shop_addon");
+    if (state && !state.complete) {
+      state.degraded = true;
+      globalThis.__sqlite_sync_complete_v2__.set("shop_addon", Date.now());
+      globalThis.__sqlite_flush_pending_v3__("shop_addon");
+    }
+  } catch (e) {}
+}, 200);
 // === FIN PERSISTENCIA SQLITE PUENTE V3 ===
 
 // ============================================================================
@@ -142,11 +211,12 @@ const MARKET_SUPPLY_KEY = "market_supply_hourly_v1";
 function getMarketDemandMultiplier(itemKey) {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("shop_addon", "world", MARKET_SUPPLY_KEY);
-    const supplyData = raw ? JSON.parse(String(raw)) : {};
+    const supplyData = raw ? globalThis.__sqlite_read_json_v3__(raw) : {};
     const hourKey = quotaHourUtc();
     const count = Number(supplyData[hourKey]?.[itemKey] || 0);
-    // Cada 2,500 unidades vendidas en la hora reducen 10%, hasta un piso del 60%
-    const factor = Math.max(0.60, 1.0 - (count / 2500) * 0.10);
+    // Cada 2,500 unidades vendidas en la hora reducen 10%, hasta un piso del 60%.
+    // Las compras restan oferta; el techo del 100% evita precios sobre el base.
+    const factor = Math.min(1.0, Math.max(0.60, 1.0 - (count / 2500) * 0.10));
     return factor;
   } catch {
     return 1.0;
@@ -156,7 +226,7 @@ function getMarketDemandMultiplier(itemKey) {
 function recordMarketSupply(itemKey, amount) {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("shop_addon", "world", MARKET_SUPPLY_KEY);
-    const supplyData = raw ? JSON.parse(String(raw)) : {};
+    const supplyData = raw ? globalThis.__sqlite_read_json_v3__(raw) : {};
     const hourKey = quotaHourUtc();
     if (!supplyData[hourKey]) supplyData[hourKey] = {};
     supplyData[hourKey][itemKey] = (supplyData[hourKey][itemKey] || 0) + amount;
@@ -1197,7 +1267,7 @@ function logShopTransaction(playerName, type, amount, details) {
   try {
     let registry = {};
     const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_accounts_registry_v2");
-    if (raw) registry = JSON.parse(raw);
+    registry = globalThis.__sqlite_read_json_v3__(raw, {});
     
     if (!registry[playerName]) {
       registry[playerName] = { savings: 0, loan: 0, lastUpdate: Date.now(), history: [] };
@@ -1272,7 +1342,7 @@ function changeBalance(player, delta) {
         try {
           const rawReg = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_accounts_registry_v2");
           if (rawReg) {
-            const reg = JSON.parse(rawReg);
+            const reg = globalThis.__sqlite_read_json_v3__(rawReg, {});
             if (reg[player.name]) {
               reg[player.name].savings = nextSavings;
               reg[player.name].lastUpdate = Date.now();
@@ -1334,15 +1404,26 @@ function getItemLore(item) {
   }
 }
 
+// Identidad canónica de la Semilla Sagrada (otorgada por blood_moon). El yunque puede
+// renombrar (nameTag) pero no forjar lore: exigir las 3 propiedades cierra el exploit.
+const SEMILLA_SAGRADA_TYPE_ID = "minecraft:wheat_seeds";
+const SEMILLA_SAGRADA_NAME_TAG = "§6§lSemilla Sagrada";
+const SEMILLA_SAGRADA_LORE = [
+  "§7Una semilla imbuida con magia de la tierra.",
+  "§7Véndela en la tienda por un precio alto."
+];
+
 function isSemillaSagrada(item) {
-  if (!item) return false;
-  const name = String(item.nameTag || "").replace(/§[0-9a-fk-or]/gi, "").toLowerCase();
-  if (name.includes("semilla sagrada")) return true;
   try {
-    const lore = (item.getLore?.() ?? []).join(" ").replace(/§[0-9a-fk-or]/gi, "").toLowerCase();
-    if (lore.includes("semilla sagrada")) return true;
-  } catch (e) {}
-  return false;
+    if (!item || item.typeId !== SEMILLA_SAGRADA_TYPE_ID) return false;
+    if (item.nameTag !== SEMILLA_SAGRADA_NAME_TAG) return false;
+    const lore = item.getLore?.() ?? [];
+    return Array.isArray(lore)
+      && lore.length === SEMILLA_SAGRADA_LORE.length
+      && lore.every((line, index) => line === SEMILLA_SAGRADA_LORE[index]);
+  } catch (e) {
+    return false;
+  }
 }
 
 function isCustomProtectedItem(item) {
@@ -1376,6 +1457,14 @@ function isPlainSellableItemStack(item) {
   return isSellableTypeId(item.typeId);
 }
 
+// Predicado único para contar y retirar: garantiza que ambas operaciones vean exactamente los mismos stacks.
+function matchesSellTarget(item, typeId, itemKey) {
+  if (!item) return false;
+  if (itemKey === "semilla_sagrada") return isSemillaSagrada(item);
+  if (isSemillaSagrada(item)) return false; // vender semillas normales nunca consume Semillas Sagradas
+  return item.typeId === typeId && isPlainSellableItemStack(item);
+}
+
 function countItem(player, typeId, itemKey = null) {
   const container = getInventory(player);
   if (!container) return 0;
@@ -1383,11 +1472,7 @@ function countItem(player, typeId, itemKey = null) {
   for (let i = 0; i < container.size; i++) {
     const item = container.getItem(i);
     if (!item) continue;
-    if (itemKey === "semilla_sagrada" || isSemillaSagrada(item)) {
-      if (isSemillaSagrada(item)) count += item.amount;
-    } else if (item.typeId === typeId && isPlainSellableItemStack(item)) {
-      count += item.amount;
-    }
+    if (matchesSellTarget(item, typeId, itemKey)) count += item.amount;
   }
   return count;
 }
@@ -1401,9 +1486,7 @@ function takeItems(player, typeId, amount, itemKey = null) {
   for (let i = 0; i < container.size; i++) {
     const item = container.getItem(i);
     if (!item) continue;
-    const isTarget = (itemKey === "semilla_sagrada" || (item.nameTag && item.nameTag.includes("Semilla Sagrada")))
-      ? (item.nameTag && item.nameTag.includes("Semilla Sagrada"))
-      : (item.typeId === typeId && isPlainSellableItemStack(item));
+    const isTarget = matchesSellTarget(item, typeId, itemKey);
 
     if (isTarget) {
       const takeAmount = Math.min(item.amount, remaining);
@@ -1587,6 +1670,7 @@ function tryGiveEnchantedBook(player, enchantId, price, level = 1) {
     }
     player.sendMessage(`§b§l[§3Tienda§b§l]§r §a¡Libro encantado entregado! Se descontaron §e$${formatMoney(finalPrice)} §7(Impuesto IVA: §a$${formatMoney(taxAmount)}§7)§a.`);
     logShopTransaction(player.name, "Compra", finalPrice, `Libro Encantado: ${enchantId} Lvl ${level}`);
+    recordMarketSupply("minecraft:enchanted_book", -1);
   } catch (error) { ErrorReporter.report(error, { addonId: "shop_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
     const refund = changeBalance(player, Math.ceil(finalPrice));
     if (!refund.ok) console.warn(`[ECONOMY_CRITICAL] No se pudo reembolsar el libro encantado a ${player.name}.`);
@@ -2067,6 +2151,7 @@ function openPurchaseQuantity(player, item, catIdx) {
       return;
     }
 
+    recordMarketSupply(item.key || item.id, -qty);
     player.sendMessage(`§b§l[§3Tienda§b§l]§r §aHas comprado §e${qty}x ${item.name} §apor §e$${formatMoney(finalCost)} §7(Impuesto IVA: §a$${formatMoney(taxAmount)}§7)§a.`);
     logShopTransaction(player.name, "Compra", finalCost, `Compró ${qty}x ${item.name}`);
     console.warn(`[ECONOMY_LOG] [BUY] Player ${player.name} bought ${qty}x ${item.name} (${item.id}) for $${formatMoney(cost)}`);
@@ -2119,7 +2204,7 @@ function getPlayerInventoryItems(player) {
   for (let i = 0; i < container.size; i++) {
     const itemStack = container.getItem(i);
     if (itemStack && isPlainSellableItemStack(itemStack)) {
-      const isSemilla = itemStack.nameTag && itemStack.nameTag.includes("Semilla Sagrada");
+      const isSemilla = isSemillaSagrada(itemStack);
       const key = isSemilla ? "semilla_sagrada" : itemStack.typeId;
       const amount = itemStack.amount;
       
@@ -2182,7 +2267,7 @@ function getSaleQuotaState(player) {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("shop_addon", player, SELL_QUOTA_PROPERTY);
     if (!raw) return empty;
-    const parsed = JSON.parse(String(raw));
+    const parsed = globalThis.__sqlite_read_json_v3__(raw);
     if (parsed?.hour !== empty.hour) return empty;
     return {
       hour: empty.hour,
@@ -2211,7 +2296,7 @@ function notifyExpiredHourlySaleQuotas() {
     try {
       const raw = globalThis.__sqlite_get_prop_v2__("shop_addon", player, SELL_QUOTA_PROPERTY);
       if (!raw) continue;
-      const previous = JSON.parse(String(raw));
+      const previous = globalThis.__sqlite_read_json_v3__(raw);
       if (previous?.hour === currentHour || Number(previous?.payout) < SELL_HOURLY_PAYOUT_LIMIT) continue;
       if (globalThis.__sqlite_get_prop_v2__("shop_addon", player, SELL_QUOTA_NOTICE_PROPERTY) === previous.hour) continue;
       globalThis.__sqlite_set_prop_v2__("shop_addon", player, SELL_QUOTA_NOTICE_PROPERTY, previous.hour);
@@ -2234,7 +2319,7 @@ function getEmissionBudget(player) {
       if (storedDay !== -1) return { day, earned: 0 };
       const raw = globalThis.__sqlite_get_prop_v2__("shop_addon", player, "economy_emission_budget_v1");
       if (!raw) return { day, earned: 0 };
-      const legacy = JSON.parse(String(raw));
+      const legacy = globalThis.__sqlite_read_json_v3__(raw);
       const legacyEarned = Number(legacy?.earned);
       if (Number(legacy?.day) !== day || !Number.isSafeInteger(legacyEarned) || legacyEarned < 0 || legacyEarned > ECONOMY_DAILY_EMISSION_LIMIT) return null;
       dayObjective.setScore(player, day);
@@ -2295,7 +2380,7 @@ function commitEmission(player, reservation) {
 function getSaleAllowance(typeId, available, state) {
   if (!state || state.unavailable === true) return 0;
   let rule = SELL_RULES.get(typeId);
-  if (!rule && (typeId === "semilla_sagrada" || typeId === "minecraft:wheat_seeds")) {
+  if (!rule && typeId === "semilla_sagrada") {
     rule = { price: 300 };
   }
   if (!rule && typeId === "minecraft:enchanted_book") {
@@ -2458,6 +2543,7 @@ function openSellQuantity(player, item, qtyInInventory) {
       }
     }
     
+    recordMarketSupply(itemKey, finalQty);
     player.sendMessage(`§b§l[§3Tienda§b§l]§r §aHas vendido §e${finalQty}x ${item.name} §apor un total neto de §e$${formatMoney(netEarnings)} §7(Retención Arancel: §c$${formatMoney(taxAmount)}§7)§a.`);
     logShopTransaction(player.name, "Venta", netEarnings, `Vendió ${finalQty}x ${item.name} (Retención: $${taxAmount})`);
     console.warn(`[ECONOMY_LOG] [SELL] Player ${player.name} sold ${finalQty}x ${item.name} (${item.id}) for $${formatMoney(totalEarnings)} (Tax: $${taxAmount})`);
