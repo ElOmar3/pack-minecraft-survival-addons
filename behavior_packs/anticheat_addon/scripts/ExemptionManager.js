@@ -8,15 +8,15 @@ export class ExemptionManager {
     "staff_mode"
   ];
 
-  static addExemption(playerName, reason, durationMs) {
+  static addExemption(key, reason, durationMs) {
     const expires = Date.now() + durationMs;
-    const playerExemptions = this.exemptions.get(playerName) || {};
+    const playerExemptions = this.exemptions.get(key) || {};
     playerExemptions[reason] = expires;
-    this.exemptions.set(playerName, playerExemptions);
+    this.exemptions.set(key, playerExemptions);
   }
 
-  static isExempt(playerName, reason) {
-    const playerExemptions = this.exemptions.get(playerName);
+  static isExempt(key, reason) {
+    const playerExemptions = this.exemptions.get(key);
     if (!playerExemptions) return false;
 
     const expires = playerExemptions[reason];
@@ -25,9 +25,9 @@ export class ExemptionManager {
     if (Date.now() > expires) {
       delete playerExemptions[reason];
       if (Object.keys(playerExemptions).length === 0) {
-        this.exemptions.delete(playerName);
+        this.exemptions.delete(key);
       } else {
-        this.exemptions.set(playerName, playerExemptions);
+        this.exemptions.set(key, playerExemptions);
       }
       return false;
     }
@@ -47,7 +47,7 @@ export class ExemptionManager {
     }
   }
 
-  static clearPlayer(playerName) {
-    this.exemptions.delete(playerName);
+  static clearPlayer(key) {
+    this.exemptions.delete(key);
   }
 }

@@ -49,7 +49,7 @@ export class SegmentedAuditJournal {
   readJson(key) {
     const raw = this.store.get(key);
     if (raw === undefined) return undefined;
-    return JSON.parse(String(raw));
+    return globalThis.__sqlite_read_json_v3__(raw);
   }
 
   validateMeta(meta) {

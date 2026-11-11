@@ -10,6 +10,9 @@ import { LEGACY_MODERATION_MODE } from "./FcxLegacyModerationConfig.js";
 
 // === PERSISTENCIA SQLITE PUENTE V3 (SEGURO PARA /reload) ===
 if (!globalThis.__sqlite_store_v2__) globalThis.__sqlite_store_v2__ = new Map();
+if (!globalThis.__sqlite_write_ts_v3__) globalThis.__sqlite_write_ts_v3__ = new Map();
+if (!globalThis.__sqlite_pending_v3__) globalThis.__sqlite_pending_v3__ = new Map();
+if (!globalThis.__sqlite_unflushed_v3__) globalThis.__sqlite_unflushed_v3__ = new Map();
 if (!globalThis.__sqlite_owner_key_v2__) {
   globalThis.__sqlite_owner_key_v2__ = function(owner) {
     if (typeof owner === "string") return owner;
@@ -27,6 +30,18 @@ if (!globalThis.__sqlite_get_prop_v2__) {
     return ownerStore ? ownerStore[key] : undefined;
   };
 }
+// Lector tolerante: el demonio rehidrata objetos ya parseados; los datos legacy son strings JSON.
+if (!globalThis.__sqlite_read_json_v3__) {
+  globalThis.__sqlite_read_json_v3__ = function(raw, fallback) {
+    const fb = fallback === undefined ? null : fallback;
+    if (raw === undefined || raw === null) return fb;
+    if (typeof raw === "object") return raw;
+    if (typeof raw !== "string") return raw;
+    const text = raw.trim();
+    if (!text) return fb;
+    try { return JSON.parse(text); } catch (e) { return fb; }
+  };
+}
 if (!globalThis.__sqlite_set_prop_v2__) {
   globalThis.__sqlite_set_prop_v2__ = function(addon, owner, key, value) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
@@ -39,7 +54,21 @@ if (!globalThis.__sqlite_set_prop_v2__) {
     const payload = { addon: addonKey, owner: ownerKey, key };
     if (value === undefined) { delete ownerStore[key]; payload.deleted = true; }
     else { ownerStore[key] = value; payload.deleted = false; payload.value = value; }
-    try { console.warn("[SQLITE_SAVE_V1] " + JSON.stringify(payload)); } catch (e) {}
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    globalThis.__sqlite_write_ts_v3__.set(compositeKey, Date.now());
+    try {
+      const line = "[SQLITE_SAVE_V1] " + JSON.stringify(payload);
+      // Gating: las escrituras previas a sync_complete se encolan y se emiten al confirmar el snapshot.
+      if (globalThis.__sqlite_is_ready_v3__(addonKey)) console.warn(line);
+      else {
+        let queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+        if (!queue) { queue = []; globalThis.__sqlite_pending_v3__.set(addonKey, queue); }
+        queue.push(line);
+        let marks = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+        if (!marks) { marks = new Set(); globalThis.__sqlite_unflushed_v3__.set(addonKey, marks); }
+        marks.add(compositeKey);
+      }
+    } catch (e) {}
   };
 }
 if (!globalThis.__sqlite_rehydrate_v2__) {
@@ -47,6 +76,13 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
     const addonKey = String(addon);
     const ownerKey = globalThis.__sqlite_owner_key_v2__(owner);
+    // Versionado: una escritura local posterior a la solicitud de sync (o aún no drenada al demonio) gana sobre el snapshot.
+    const status = globalThis.__sqlite_sync_status_v3__.get(addonKey);
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    const writeTs = globalThis.__sqlite_write_ts_v3__.get(compositeKey);
+    const unflushed = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+    if (unflushed && unflushed.has(compositeKey)) return;
+    if (status && status.requestedAt !== undefined && writeTs !== undefined && writeTs >= status.requestedAt) return;
     let addonStore = globalThis.__sqlite_store_v2__.get(addonKey);
     if (!addonStore) { addonStore = new Map(); globalThis.__sqlite_store_v2__.set(addonKey, addonStore); }
     let ownerStore = addonStore.get(ownerKey);
@@ -57,16 +93,35 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
 }
 if (!globalThis.__sqlite_sync_complete_v2__) globalThis.__sqlite_sync_complete_v2__ = new Map();
 if (!globalThis.__sqlite_sync_status_v3__) globalThis.__sqlite_sync_status_v3__ = new Map();
+if (!globalThis.__sqlite_is_ready_v3__) {
+  globalThis.__sqlite_is_ready_v3__ = function(addon) {
+    const status = globalThis.__sqlite_sync_status_v3__.get(String(addon));
+    return Boolean(status && (status.complete || status.degraded));
+  };
+}
+if (!globalThis.__sqlite_flush_pending_v3__) {
+  globalThis.__sqlite_flush_pending_v3__ = function(addon) {
+    const addonKey = String(addon);
+    const queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+    if (!queue || queue.length === 0) return;
+    globalThis.__sqlite_pending_v3__.delete(addonKey);
+    globalThis.__sqlite_unflushed_v3__.delete(addonKey);
+    for (const line of queue) { try { console.warn(line); } catch (e) {} }
+  };
+}
 if (!globalThis.__sqlite_request_sync_v3__) {
   globalThis.__sqlite_request_sync_v3__ = function(addon, attempt) {
     const addonKey = String(addon || "");
     if (!addonKey) return;
     const previous = globalThis.__sqlite_sync_status_v3__.get(addonKey) || {};
+    // Conservar la ventana original en reintentos para que el guard de versión no se relaje.
+    const keepWindow = previous.requestedAt && !previous.complete && !previous.degraded;
     globalThis.__sqlite_sync_status_v3__.set(addonKey, {
       ...previous,
-      requestedAt: Date.now(),
+      requestedAt: keepWindow ? previous.requestedAt : Date.now(),
       attempt: Number(attempt || 0),
       complete: false,
+      degraded: false,
       protocol: 0,
     });
     try { console.warn("[SQLITE_REQUEST_SYNC] " + JSON.stringify({ addon: addonKey, protocol: 3, attempt: Number(attempt || 0) })); } catch (e) {}
@@ -78,6 +133,7 @@ try {
   if (!globalThis.__sqlite_listener_callback_v3__) {
     const callback = function(event) {
     if (!event || (event.id !== "sqlite:load" && event.id !== "sqlite:sync" && event.id !== "sqlite:load_chunk" && event.id !== "sqlite:sync_complete")) return;
+    // Solo el demonio (consola del servidor) puede rehidratar; un jugador jamás debe inyectar estado.
     if (event.sourceEntity && event.sourceEntity.typeId === "minecraft:player") return;
     try {
       const payload = JSON.parse(event.message || "{}");
@@ -93,13 +149,14 @@ try {
             protocol: Number(payload.protocol || 0),
             entryCount: Number(payload.entryCount || 0),
           });
+          globalThis.__sqlite_flush_pending_v3__(addonKey);
         }
         return;
       }
       if (event.id === "sqlite:load_chunk") {
         const count = Number(payload.chunkCount);
         const index = Number(payload.chunkIndex);
-        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 128 || !Number.isInteger(index) || index < 0 || index >= count) return;
+        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 4096 || !Number.isInteger(index) || index < 0 || index >= count) return;
         const chunkKey = String(payload.chunkId);
         let state = globalThis.__sqlite_chunk_store_v2__.get(chunkKey);
         if (!state || state.count !== count) {
@@ -134,6 +191,17 @@ system.runTimeout(() => {
     if (!state || Number(state.protocol || 0) < 3) globalThis.__sqlite_request_sync_v3__("home_spawn_addon", 1);
   } catch (e) {}
 }, 120);
+system.runTimeout(() => {
+  // Sin demonio (mundo importado sin bridge) se opera en modo degradado tras ~10s: RAM es la fuente de verdad.
+  try {
+    const state = globalThis.__sqlite_sync_status_v3__.get("home_spawn_addon");
+    if (state && !state.complete) {
+      state.degraded = true;
+      globalThis.__sqlite_sync_complete_v2__.set("home_spawn_addon", Date.now());
+      globalThis.__sqlite_flush_pending_v3__("home_spawn_addon");
+    }
+  } catch (e) {}
+}, 200);
 // === FIN PERSISTENCIA SQLITE PUENTE V3 ===
 console.warn("Home, Spawn y TPA Addon iniciado.");
 system.runTimeout(() => { try { const entries = [].map((id) => { const value = globalThis.__sqlite_get_prop_v2__("home_spawn_addon", "world", id); return { id, size: typeof value === "string" ? value.length : value === undefined ? 0 : String(value).length }; }).sort((a, b) => b.size - a.size); console.warn(`[DP_AUDIT_HOME_V1] total_chars=${entries.reduce((sum, entry) => sum + entry.size, 0)} largest=${JSON.stringify(entries.slice(0, 12))}`); } catch (e) { console.warn(`[DP_AUDIT_HOME_V1] failed=${String(e?.message || e)}`); } }, 100);
@@ -290,6 +358,82 @@ function grantTemporaryTeleportExemption(player, durationTicks = TELEPORT_EXEMPT
   }, durationTicks);
 }
 
+// === WARMUP DE TELETRANSPORTE (anti escape en combate) ===
+const TELEPORT_WARMUP_TICKS = 60; // 3 segundos
+const PVP_COMBAT_WINDOW_MS = 10 * 1000;
+const pendingTeleportWarmups = new Map(); // player.id -> { runId }
+const pvpCombatUntil = new Map(); // player.id -> timestamp fin de combate
+
+function isInPvpCombat(player) {
+  return Date.now() < Number(pvpCombatUntil.get(player?.id) || 0);
+}
+
+function cancelTeleportWarmup(player, reason) {
+  const entry = pendingTeleportWarmups.get(player?.id);
+  if (!entry) return false;
+  pendingTeleportWarmups.delete(player.id);
+  try { system.clearRun(entry.runId); } catch (e) {}
+  try {
+    if (player.isValid) {
+      player.sendMessage(reason === "combat"
+        ? "§b§l[§3TP§b§l]§r §cTeletransporte cancelado: entraste en combate PvP."
+        : "§b§l[§3TP§b§l]§r §cTeletransporte cancelado: recibiste daño.");
+    }
+  } catch (e) {}
+  return true;
+}
+
+function startTeleportWarmup(player, label, executeTeleport) {
+  if (!player || !player.isValid) return false;
+  if (isInPvpCombat(player)) {
+    try { player.sendMessage("§b§l[§3TP§b§l]§r §cEstás en combate PvP. Espera unos segundos antes de teletransportarte."); } catch (e) {}
+    return false;
+  }
+  if (pendingTeleportWarmups.has(player.id)) {
+    try { player.sendMessage("§b§l[§3TP§b§l]§r §eYa tienes un teletransporte en curso."); } catch (e) {}
+    return false;
+  }
+  try {
+    player.sendMessage(`§b§l[§3TP§b§l]§r §7Teletransporte a §e${label}§7 en §e3 segundos§7. Si recibes daño o entras en combate PvP se cancelará.`);
+  } catch (e) {}
+  const runId = system.runTimeout(() => {
+    pendingTeleportWarmups.delete(player.id);
+    try {
+      if (!player.isValid) return;
+      if (isInPvpCombat(player)) {
+        player.sendMessage("§b§l[§3TP§b§l]§r §cTeletransporte cancelado: estás en combate PvP.");
+        return;
+      }
+      executeTeleport();
+    } catch (error) {
+      ErrorReporter.report(error, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "teleportWarmup", category: "runtime" });
+      try { player.sendMessage("§b§l[§3TP§b§l]§r §cError al teletransportarse."); } catch (e) {}
+    }
+  }, TELEPORT_WARMUP_TICKS);
+  pendingTeleportWarmups.set(player.id, { runId });
+  return true;
+}
+
+try {
+  world.afterEvents.entityHurt.subscribe((event) => {
+    try {
+      const victim = event.hurtEntity;
+      if (!victim || victim.typeId !== "minecraft:player") return;
+      // Cualquier daño recibido cancela el warmup activo.
+      cancelTeleportWarmup(victim, "damage");
+      const attacker = event.damageSource?.damagingEntity;
+      if (!attacker || attacker.typeId !== "minecraft:player" || attacker.id === victim.id) return;
+      const until = Date.now() + PVP_COMBAT_WINDOW_MS;
+      pvpCombatUntil.set(victim.id, until);
+      pvpCombatUntil.set(attacker.id, until);
+      cancelTeleportWarmup(attacker, "combat");
+    } catch (e) {}
+  });
+} catch (e) {
+  ErrorReporter.report(e, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "pvpWarmupTracker", category: "runtime" });
+}
+// === FIN WARMUP DE TELETRANSPORTE ===
+
 function getDupeItemFingerprint(item, includeAmount = true) {
   if (!item) return "";
   try {
@@ -345,7 +489,7 @@ function dupeQuotaDayUtc() {
 function getDupeQuota(player) {
   const empty = { day: dupeQuotaDayUtc(), used: 0 };
   try {
-    const parsed = JSON.parse(String(globalThis.__sqlite_get_prop_v2__("home_spawn_addon", player, DUPE_QUOTA_PROPERTY) || "{}"));
+    const parsed = globalThis.__sqlite_read_json_v3__(globalThis.__sqlite_get_prop_v2__("home_spawn_addon", player, DUPE_QUOTA_PROPERTY) || "{}");
     if (parsed?.day !== empty.day) return empty;
     return { day: empty.day, used: Math.max(0, Math.min(DUPE_DAILY_COPY_LIMIT, Math.floor(Number(parsed.used) || 0))) };
   } catch (e) {
@@ -716,6 +860,9 @@ function normalizePlayerName(value) {
 const RELAY_MODERATION_EVENT_ID = "server:moderation";
 const RELAY_MODERATION_MAX_MESSAGE_LENGTH = 512;
 const RELAY_MODERATION_MAX_REASON_LENGTH = 240;
+// Tope de cordura para baneos temporales recibidos por relay (90 días, el máximo
+// documentado para OWNER en FCX). El demonio ya acota la duración por rol.
+const RELAY_MODERATION_MAX_BAN_MINUTES = 129600;
 const RELAY_PLAYER_NAME_PATTERN = /^[A-Za-z0-9_ .-]{1,32}$/;
 
 function normalizeRelayPlayerName(value) {
@@ -831,6 +978,76 @@ function handleRelayModerationEvent(event) {
     }
     return;
   }
+  if (action === "temporary" || action === "permanent") {
+    const isPermanent = action === "permanent";
+    const expectedKeys = isPermanent
+      ? ["action", "playerName", "reason", "actorName", "correlationId"]
+      : ["action", "playerName", "durationMinutes", "reason", "actorName", "correlationId"];
+    if (!hasExactKeys(payload, expectedKeys)) {
+      console.warn("[BAN_SYNC] rejected reason=invalid_ban_keys");
+      return;
+    }
+    let durationMinutes = 0;
+    if (!isPermanent) {
+      if (!Number.isInteger(payload.durationMinutes) || payload.durationMinutes < 1 || payload.durationMinutes > RELAY_MODERATION_MAX_BAN_MINUTES) {
+        console.warn("[BAN_SYNC] rejected reason=invalid_ban_duration");
+        return;
+      }
+      durationMinutes = payload.durationMinutes;
+    }
+    const actorName = normalizeRelayPlayerName(payload.actorName) || "Consola";
+    const correlationId = String(payload.correlationId || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32);
+    try {
+      const expiresAt = isPermanent ? 0 : Date.now() + durationMinutes * 60000;
+      const target = world.getAllPlayers().find((player) => normalizePlayerName(player.name) === normalizedName);
+      const targetXuid = String(target?.xuid || "").trim();
+      const entry = buildBanEntry(playerName, target, reason, actorName, expiresAt);
+      const sameIdentity = (item) =>
+        normalizePlayerName(item?.nameLower || item?.name) === normalizedName ||
+        (targetXuid && String(item?.xuid || "").trim() === targetXuid);
+      const { active } = pruneExpiredBans(loadBans());
+      const updatedBans = active.filter((item) => !sameIdentity(item));
+      updatedBans.push(entry);
+      saveBans(updatedBans);
+      if (globalThis.__sqlite_get_prop_v2__("home_spawn_addon", "world", "bans_db") !== JSON.stringify(updatedBans)) {
+        throw new Error("ban_write_verification_failed");
+      }
+      if (target) kickBannedPlayer(target, entry);
+      console.warn(`[BAN_SYNC] ${JSON.stringify({ name: playerName, permanent: isPermanent, expiresAt, correlationId })}`);
+      void announceConfirmedModeration(isPermanent ? "permanent" : "temporary", playerName, durationMinutes, reason);
+    } catch (error) {
+      ErrorReporter.report(error, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "relay_ban", category: "moderation" });
+      console.warn("[BAN_SYNC] rejected reason=write_failed");
+    }
+    return;
+  }
+
+  if (action === "unban") {
+    if (!hasExactKeys(payload, ["action", "playerName", "reason", "actorName", "correlationId"])) {
+      console.warn("[BAN_SYNC] rejected reason=invalid_unban_keys");
+      return;
+    }
+    const correlationId = String(payload.correlationId || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32);
+    try {
+      const target = world.getAllPlayers().find((player) => normalizePlayerName(player.name) === normalizedName);
+      const targetXuid = String(target?.xuid || "").trim();
+      const sameIdentity = (item) =>
+        normalizePlayerName(item?.nameLower || item?.name) === normalizedName ||
+        (targetXuid && String(item?.xuid || "").trim() === targetXuid);
+      const { active } = pruneExpiredBans(loadBans());
+      const updatedBans = active.filter((item) => !sameIdentity(item));
+      saveBans(updatedBans);
+      if (globalThis.__sqlite_get_prop_v2__("home_spawn_addon", "world", "bans_db") !== JSON.stringify(updatedBans)) {
+        throw new Error("unban_write_verification_failed");
+      }
+      if (target) target.sendMessage("§b§l[§3Servidor§b§l]§r §aTu veto ha sido retirado. Ya puedes volver al servidor.");
+      console.warn(`[UNBAN_SYNC] ${JSON.stringify({ name: playerName, correlationId })}`);
+    } catch (error) {
+      ErrorReporter.report(error, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "relay_unban", category: "moderation" });
+      console.warn("[BAN_SYNC] rejected reason=unban_write_failed");
+    }
+    return;
+  }
   console.warn("[MUTE_SYNC] rejected reason=unsupported_action");
 }
 
@@ -853,7 +1070,7 @@ const PLAYER_HISTORY_DB_KEY = "players_history_db";
 function loadPlayerHistory() {
   try {
     const data = globalThis.__sqlite_get_prop_v2__("home_spawn_addon", "world", PLAYER_HISTORY_DB_KEY);
-    const parsed = data ? JSON.parse(String(data)) : [];
+    const parsed = data ? globalThis.__sqlite_read_json_v3__(data) : [];
     return Array.isArray(parsed) ? parsed : [];
   } catch (e) { ErrorReporter.report(e, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
     console.warn("Error al cargar historial de jugadores: " + e);
@@ -953,10 +1170,10 @@ let bansCache = [];
 
 function loadBans() {
   try {
-    const raw = String(globalThis.__sqlite_get_prop_v2__("home_spawn_addon", "world", "bans_db") || "");
+    const raw = globalThis.__sqlite_get_prop_v2__("home_spawn_addon", "world", "bans_db");
     if (raw === bansCacheRaw) return bansCache;
     bansCacheRaw = raw;
-    bansCache = raw ? JSON.parse(raw) : [];
+    bansCache = globalThis.__sqlite_read_json_v3__(raw, []);
     return bansCache;
   } catch (e) { ErrorReporter.report(e, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
     console.warn("Error al cargar bans: " + e);
@@ -1320,13 +1537,11 @@ async function handleCommand(player, command, args) {
       }
 
       const extraHome = getSharedExtraHomeLocation(player, extraSlot);
-      try {
+      startTeleportWarmup(player, `Casa Extra #${requestedSlot}`, () => {
         grantTemporaryTeleportExemption(player);
         player.teleport({ x: extraHome.x, y: extraHome.y, z: extraHome.z }, { dimension: getDimensionSafe(extraHome.dimension) });
         player.sendMessage(`§b§l[§3Base§b§l]§r §aTeletransportado a Casa Extra #${requestedSlot}.`);
-      } catch (error) { ErrorReporter.report(error, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "extraHomeTeleport", category: "runtime" });
-        player.sendMessage("§b§l[§3Base§b§l]§r §cError al teletransportarse a esa casa.");
-      }
+      });
       return;
     }
 
@@ -1340,17 +1555,57 @@ async function handleCommand(player, command, args) {
       return;
     }
     
-    try {
+    startTeleportWarmup(player, "tu Home", () => {
       const dim = getDimensionSafe(dimId);
       grantTemporaryTeleportExemption(player);
       player.teleport({ x, y, z }, { dimension: dim });
       player.sendMessage("§b§l[§3Base§b§l]§r §aTeletransportado a tu Home.");
-    } catch (error) { ErrorReporter.report(error, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
-      player.sendMessage("§b§l[§3Base§b§l]§r §cError al teletransportarse: " + error.message);
-    }
+    });
     return;
   }
-  
+
+  if (command === "delhome") {
+    const requestedSlot = args?.[1] === undefined ? 1 : Number(args[1]);
+    if (!Number.isInteger(requestedSlot) || requestedSlot < 1 || requestedSlot > 5) {
+      player.sendMessage("§b§l[§3Base§b§l]§r §cUsa §e/s:delhome 1§c para la principal o §e/s:delhome 2§c hasta §e/s:delhome 5§c para una casa extra.");
+      return;
+    }
+
+    if (requestedSlot === 1) {
+      const hadHome = globalThis.__sqlite_get_prop_v2__("home_spawn_addon", player, "home_x") !== undefined;
+      if (!hadHome) {
+        player.sendMessage("§b§l[§3Base§b§l]§r §cNo tienes un Home principal configurado. Usa §e/s:sethome§c para guardar uno.");
+        return;
+      }
+      globalThis.__sqlite_set_prop_v2__("home_spawn_addon", player, "home_x", undefined);
+      globalThis.__sqlite_set_prop_v2__("home_spawn_addon", player, "home_y", undefined);
+      globalThis.__sqlite_set_prop_v2__("home_spawn_addon", player, "home_z", undefined);
+      globalThis.__sqlite_set_prop_v2__("home_spawn_addon", player, "home_dimension", undefined);
+      player.sendMessage("§b§l[§3Base§b§l]§r §aTu Home principal fue eliminado correctamente.");
+      return;
+    }
+
+    const extraSlot = requestedSlot - 1;
+    const sharedLocation = getSharedExtraHomeLocation(player, extraSlot);
+    const hadBridgeRecord = globalThis.__sqlite_get_prop_v2__("home_spawn_addon", player, `home_x_${extraSlot}`) !== undefined;
+    if (!sharedLocation && !hadBridgeRecord) {
+      player.sendMessage(`§b§l[§3Base§b§l]§r §cNo tienes guardada la Casa Extra #${requestedSlot}.`);
+      return;
+    }
+    // El almacenamiento compartido usa s=1 como marcador de casa activa; se apaga
+    // para que getSharedExtraHomeLocation deje de resolver la casa eliminada.
+    try {
+      const marker = world.scoreboard.getObjective(`xhome_${extraSlot}_s`);
+      if (marker) marker.setScore(player, 0);
+    } catch (e) { ErrorReporter.report(e, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "delhome_shared", category: "runtime" }); }
+    globalThis.__sqlite_set_prop_v2__("home_spawn_addon", player, `home_x_${extraSlot}`, undefined);
+    globalThis.__sqlite_set_prop_v2__("home_spawn_addon", player, `home_y_${extraSlot}`, undefined);
+    globalThis.__sqlite_set_prop_v2__("home_spawn_addon", player, `home_z_${extraSlot}`, undefined);
+    globalThis.__sqlite_set_prop_v2__("home_spawn_addon", player, `home_dim_${extraSlot}`, undefined);
+    player.sendMessage(`§b§l[§3Base§b§l]§r §aLa Casa Extra #${requestedSlot} fue eliminada correctamente.`);
+    return;
+  }
+
   // --- COMANDOS DE SPAWN ---
   if (command === "setspawn") {
     const isOp = isPlayerOp(player);
@@ -1386,14 +1641,12 @@ async function handleCommand(player, command, args) {
       dimId = "minecraft:overworld";
     }
     
-    try {
+    startTeleportWarmup(player, "el Spawn", () => {
       const dim = getDimensionSafe(dimId);
       grantTemporaryTeleportExemption(player);
       player.teleport({ x: x, y: y, z: z }, { dimension: dim });
       player.sendMessage("§b§l[§3Spawn§b§l]§r §aTeletransportado al Spawn principal.");
-    } catch (error) { ErrorReporter.report(error, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
-      player.sendMessage("§b§l[§3Spawn§b§l]§r §cError al teletransportarse al Spawn: " + error.message);
-    }
+    });
     return;
   }
 
@@ -1460,15 +1713,13 @@ async function handleCommand(player, command, args) {
       return;
     }
     
-    try {
+    startTeleportWarmup(requester, player.name, () => {
       grantTemporaryTeleportExemption(requester);
       requester.teleport(player.location, { dimension: player.dimension });
-      requester.sendMessage(`§b§l[§3TPA§b§l]§r §a${player.name} aceptó tu solicitud. Teletransportando...`);
-      player.sendMessage(`§b§l[§3TPA§b§l]§r §aHas aceptado la solicitud de ${requester.name}.`);
-    } catch (error) { ErrorReporter.report(error, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
-      player.sendMessage("§b§l[§3TPA§b§l]§r §cError al teletransportar: " + error.message);
-    }
-    
+      requester.sendMessage(`§b§l[§3TPA§b§l]§r §a${player.name} aceptó tu solicitud. Teletransportado.`);
+    });
+    player.sendMessage(`§b§l[§3TPA§b§l]§r §aHas aceptado la solicitud de ${requester.name}.`);
+
     tpaRequests.delete(playerKey);
     return;
   }
@@ -1646,7 +1897,7 @@ async function handleCommand(player, command, args) {
         return;
       }
       
-      const deathInfo = JSON.parse(deathRaw);
+      const deathInfo = globalThis.__sqlite_read_json_v3__(deathRaw);
       const dimNames = {
         "minecraft:overworld": "Overworld (Mundo Normal)",
         "minecraft:nether": "Nether (Inframundo)",
@@ -1679,14 +1930,17 @@ async function handleCommand(player, command, args) {
       player.sendMessage("§b§l[§3Tumba§b§l]§r §cNo tienes una tumba activa a la que puedas ir.");
       return;
     }
-    try {
+    startTeleportWarmup(player, "tu tumba", () => {
+      // Revalidar al completar el warmup: la tumba pudo expirar o ser reclamada durante la espera.
+      const fresh = findOwnedActiveGrave(player);
+      if (fresh.state !== "ready") {
+        player.sendMessage("§b§l[§3Tumba§b§l]§r §cTu tumba ya no está disponible para teletransporte.");
+        return;
+      }
       grantTemporaryTeleportExemption(player);
-      player.teleport(result.destination, { dimension: result.dimension });
+      player.teleport(fresh.destination, { dimension: fresh.dimension });
       player.sendMessage("§b§l[§3Tumba§b§l]§r §aTeletransportado a tu tumba activa.");
-    } catch (error) {
-      ErrorReporter.report(error, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "graveTeleport", category: "runtime" });
-      player.sendMessage("§b§l[§3Tumba§b§l]§r §cNo se pudo teletransportar a tu tumba.");
-    }
+    });
     return;
   }
 
@@ -2071,7 +2325,7 @@ system.runInterval(() => {
           if (!spawnLoc) {
             const spawnLocRaw = globalThis.__sqlite_get_prop_v2__("home_spawn_addon", entity, "spawn_loc");
             if (spawnLocRaw) {
-              spawnLoc = JSON.parse(spawnLocRaw);
+              spawnLoc = globalThis.__sqlite_read_json_v3__(spawnLocRaw);
             }
           }
 
@@ -2303,6 +2557,14 @@ system.runInterval(() => {
 
 // --- BRÚJULA DEL MENÚ COMUNITARIO ---
 
+const MENU_COMPASS_NAME = "§6§l🧭 Menú Comunitario §r§7(Clic Derecho)";
+const MENU_COMPASS_LORE = [
+  "§7Servicios, guías y reglas",
+  "§7de Pacífico Comunitario.",
+  "",
+  "§cNo se pierde al morir"
+];
+
 function checkServerMenuBook(player) {
   const inventory = player.getComponent("minecraft:inventory")?.container;
   if (!inventory) return;
@@ -2315,14 +2577,17 @@ function checkServerMenuBook(player) {
         // Eliminar versiones antiguas (libros) para migrar a la brújula
         inventory.setItem(i, undefined);
       } else {
-        item.nameTag = "§6§l🧭 Menú Comunitario §r§7(Clic Derecho)";
-        item.setLore([
-          "§7Servicios, guías y reglas",
-          "§7de Pacífico Comunitario.",
-          "",
-          "§cNo se pierde al morir"
-        ]);
-        inventory.setItem(i, item);
+        // Dirty-flag: sólo reescribir el ítem si su nombre o lore difieren del
+        // canon. Reescribirlo en cada ciclo enviaba paquetes visuales sin cambios.
+        const lore = item.getLore?.() ?? [];
+        const upToDate = item.nameTag === MENU_COMPASS_NAME &&
+          lore.length === MENU_COMPASS_LORE.length &&
+          lore.every((line, index) => line === MENU_COMPASS_LORE[index]);
+        if (!upToDate) {
+          item.nameTag = MENU_COMPASS_NAME;
+          item.setLore([...MENU_COMPASS_LORE]);
+          inventory.setItem(i, item);
+        }
         hasBook = true;
       }
     }
@@ -2331,13 +2596,8 @@ function checkServerMenuBook(player) {
   if (!hasBook) {
     try {
       const book = new ItemStack("minecraft:compass", 1);
-      book.nameTag = "§6§l🧭 Menú Comunitario §r§7(Clic Derecho)";
-      book.setLore([
-        "§7Servicios, guías y reglas",
-        "§7de Pacífico Comunitario.",
-        "",
-        "§cNo se pierde al morir"
-      ]);
+      book.nameTag = MENU_COMPASS_NAME;
+      book.setLore([...MENU_COMPASS_LORE]);
       
       const enchantable = book.getComponent("minecraft:enchantable");
       if (enchantable) {
@@ -3870,7 +4130,7 @@ function openTumbaGUI(player) {
       return;
     }
 
-    const deathInfo = JSON.parse(deathRaw);
+    const deathInfo = globalThis.__sqlite_read_json_v3__(deathRaw);
     const dimNames = {
       "minecraft:overworld": "Overworld (Mundo Normal)",
       "minecraft:nether": "Nether (Inframundo)",
@@ -4148,7 +4408,7 @@ function loadPersistedActiveGraves() {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("home_spawn_addon", "world", ACTIVE_GRAVES_PROPERTY_KEY);
     if (!raw) return;
-    const parsed = JSON.parse(String(raw));
+    const parsed = globalThis.__sqlite_read_json_v3__(raw);
     if (!Array.isArray(parsed)) return;
 
     activeGraves.clear();
@@ -4215,9 +4475,10 @@ function getSafeGraveTeleportLocation(dimension, grave) {
 
 function findOwnedActiveGrave(player) {
   const owner = String(player?.name || "").trim().toLowerCase();
-  if (!owner) return { state: "missing" };
+  const playerXuid = String(player?.xuid || "").trim();
+  if (!owner && !playerXuid) return { state: "missing" };
   const candidates = Array.from(activeGraves.values())
-    .filter(grave => String(grave?.playerName || "").trim().toLowerCase() === owner)
+    .filter(grave => graveOwnedByPlayer(player, grave))
     .sort((left, right) => Number(right?.createdAt || right?.expiresAt || 0) - Number(left?.createdAt || left?.expiresAt || 0));
   for (const grave of candidates) {
     if (Date.now() >= Number(grave.expiresAt || 0)) {
@@ -4244,11 +4505,25 @@ function findOwnedActiveGrave(player) {
   return { state: "missing" };
 }
 
-function registerActiveGrave(playerName, loc, firstPos, secondPos) {
+// Identidad del dueño: XUID cuando existe (tumbas nuevas); nombre exacto solo para
+// registros legacy persistidos antes de guardar ownerXuid.
+function graveOwnedByPlayer(player, grave) {
+  if (!player || !grave) return false;
+  const graveXuid = String(grave.ownerXuid || "").trim();
+  if (graveXuid) {
+    const playerXuid = String(player.xuid || "").trim();
+    return playerXuid !== "" && playerXuid === graveXuid;
+  }
+  const owner = String(grave.playerName || "").trim().toLowerCase();
+  return owner !== "" && owner === String(player.name || "").trim().toLowerCase();
+}
+
+function registerActiveGrave(playerName, loc, firstPos, secondPos, ownerXuid = "") {
   const graveId = `${playerName.toLowerCase()}_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
   activeGraves.set(graveId, {
     id: graveId,
     playerName,
+    ownerXuid: String(ownerXuid || ""),
     dimensionId: loc.dimension,
     firstPos,
     secondPos,
@@ -4261,7 +4536,7 @@ function registerActiveGrave(playerName, loc, firstPos, secondPos) {
   return graveId;
 }
 
-function createPlayerGrave(playerName, loc, items, onComplete = undefined) {
+function createPlayerGrave(playerName, loc, items, onComplete = undefined, ownerXuid = "") {
   if (!loc?.dimension || !items?.length) return undefined;
   try {
     const dimension = world.getDimension(loc.dimension);
@@ -4270,7 +4545,7 @@ function createPlayerGrave(playerName, loc, items, onComplete = undefined) {
     const [firstPos, secondPos] = findGraveChestPositions(loc, dimension);
     dimension.getBlock(firstPos)?.setType("minecraft:chest");
     dimension.getBlock(secondPos)?.setType("minecraft:chest");
-    const graveId = registerActiveGrave(playerName, loc, firstPos, secondPos);
+    const graveId = registerActiveGrave(playerName, loc, firstPos, secondPos, ownerXuid);
     fillGraveChest(dimension, firstPos, secondPos, items, success => onComplete?.(success, graveId));
     return { firstPos, secondPos, graveId };
   } catch (e) { ErrorReporter.report(e, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
@@ -4351,13 +4626,22 @@ try {
     if (matchingGraveId) {
       // Cancelar la rotura nativa para evitar que tire los cofres como items
       event.cancel = true;
+      const breaker = event.player;
+      const graveRecord = activeGraves.get(matchingGraveId);
+      // Solo el dueño (XUID) o un administrador pueden reclamar la tumba.
+      if (!graveOwnedByPlayer(breaker, graveRecord) && !isPlayerOp(breaker)) {
+        try {
+          breaker?.sendMessage("§b§l[§3Tumba§b§l]§r §cEsta tumba pertenece a otro jugador. No puedes romperla ni reclamarla.");
+        } catch (e) {}
+        return;
+      }
       // Las dos mitades del cofre doble pueden disparar eventos casi a la vez.
       // La primera reclamación gana y la segunda no puede volver a entregar el
       // mismo inventario mientras la primera termina de vaciar la tumba.
       if (pendingGraveRecoveries.has(matchingGraveId)) return;
       pendingGraveRecoveries.add(matchingGraveId);
-      
-      const player = event.player;
+
+      const player = breaker;
       const dimension = block.dimension || player?.dimension;
       
       system.run(() => {
@@ -4464,6 +4748,12 @@ system.runInterval(() => {
 // Limpiar memoria al desconectarse el jugador
 world.afterEvents.playerLeave.subscribe((event) => {
   playerLastLocations.delete(event.playerId);
+  const warmup = pendingTeleportWarmups.get(event.playerId);
+  if (warmup) {
+    pendingTeleportWarmups.delete(event.playerId);
+    try { system.clearRun(warmup.runId); } catch (e) {}
+  }
+  pvpCombatUntil.delete(event.playerId);
 });
 
 function isDeathInColiseum(loc) {
@@ -4471,7 +4761,7 @@ function isDeathInColiseum(loc) {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("home_spawn_addon", "world", "protecciones_db");
     if (!raw) return false;
-    const zones = JSON.parse(raw);
+    const zones = globalThis.__sqlite_read_json_v3__(raw, []);
     for (const zone of zones) {
       if ((zone.zoneType === "coliseum" || zone.isAdmin) && zone.dimension === loc.dimension) {
         if (loc.x >= zone.min.x && loc.x <= zone.max.x &&
@@ -4524,7 +4814,8 @@ try {
           y: Math.round(loc.y),
           z: Math.round(loc.z),
           dimension: loc.dimension,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          xuid: String(matchedPlayer.xuid || "")
         };
 
         // Guardar en propiedades del mundo usando el nombre del jugador para persistencia real
@@ -4551,7 +4842,7 @@ try {
                 `§b§l[§3Tumba§b§l]§r §7Se creó un §ecofer doble§7 con tus objetos en §aX:${grave.firstPos.x} §7Y:§a${grave.firstPos.y} §7Z:§a${grave.firstPos.z}§7. §8Expira en 10 minutos. §7Usa §e/s:tumbatp§7 para ir hacia ella.`
               );
             } catch (messageError) { ErrorReporter.report(messageError, { addonId: "home_spawn_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" }); }
-          });
+          }, String(matchedPlayer.xuid || ""));
           if (!grave) restoreExactGraveTransfer(matchedPlayer, transfer);
         }
         

@@ -31,10 +31,9 @@ export class AdminSessionInvalidator {
     const pending = this.pending.get(confirmationId);
     this.pending.delete(confirmationId);
     if (!pending || pending.expiresAt < now) return fail(AdminErrorCode.ACTION_CONFIRMATION_EXPIRED);
-    if (pending.actorPrincipalId !== actor.principalId && actor.identitySource !== "OPERATOR_FALLBACK") return fail(AdminErrorCode.ADMIN_SESSION_REVOKED);
+    if (pending.actorPrincipalId !== actor.principalId) return fail(AdminErrorCode.ADMIN_SESSION_REVOKED);
     if (pending.targetEntityId !== String(targetEntityId ?? "")) return fail(AdminErrorCode.PLAYER_NOT_FOUND);
-    const isFallbackOwner = actor.role === "OWNER" || actor.identitySource === "OPERATOR_FALLBACK";
-    if (!this.registry.findActiveByPrincipalId(actor.principalId) && !isFallbackOwner) return fail(AdminErrorCode.ADMIN_SESSION_REVOKED);
+    if (!this.registry.findActiveByPrincipalId(actor.principalId)) return fail(AdminErrorCode.ADMIN_SESSION_REVOKED);
     return ok(pending);
   }
 

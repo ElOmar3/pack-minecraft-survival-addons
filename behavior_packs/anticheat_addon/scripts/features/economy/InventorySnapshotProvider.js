@@ -1,5 +1,6 @@
 import { ErrorReporter } from "../../ErrorReporter.js";
 import { system, world } from '@minecraft/server';
+import { playerKey } from "../../Identity.js";
 
 const HIGH_RISK_DELTA_LIMITS = new Map([
     ["minecraft:dragon_egg", 1],
@@ -48,19 +49,19 @@ export class InventorySnapshotProvider {
                         assets.push({ id: item.typeId, amount: item.amount });
                     }
                 }
-                this.takeSnapshot(player.name, assets);
+                this.takeSnapshot(playerKey(player), assets, player.name);
             }
         } catch (e) { ErrorReporter.report(e, { addonId: "anticheat_addon", moduleId: "InventorySnapshotProvider.js", operation: "try-catch", category: "runtime" });
             console.warn("[Economy] Error in pollAllInventories: " + e);
         }
     }
     
-    takeSnapshot(playerId, inventoryAssets) {
+    takeSnapshot(playerId, inventoryAssets, displayName = playerId) {
         const hash = this._hashAssets(inventoryAssets);
         const previousSnapshot = this.snapshots.get(playerId);
         
         if (previousSnapshot) {
-            this.compareSnapshots(playerId, previousSnapshot.assets, inventoryAssets);
+            this.compareSnapshots(playerId, previousSnapshot.assets, inventoryAssets, displayName);
         }
         
         this.snapshots.set(playerId, { hash, assets: [...inventoryAssets], timestamp: Date.now() });
@@ -70,7 +71,7 @@ export class InventorySnapshotProvider {
         this.snapshots.delete(playerId);
     }
     
-    compareSnapshots(playerId, oldAssets, newAssets) {
+    compareSnapshots(playerId, oldAssets, newAssets, displayName = playerId) {
         const oldCount = {};
         for (const item of oldAssets) {
             oldCount[item.id] = (oldCount[item.id] || 0) + item.amount;
@@ -89,7 +90,7 @@ export class InventorySnapshotProvider {
             if (delta >= threshold) {
                 this.detector.reportDiscrepancy('Unexplained Positive Delta', {
                     playerId,
-                    playerName: playerId,
+                    playerName: displayName,
                     assetId: id,
                     delta,
                     threshold

@@ -1,7 +1,7 @@
 export const Config = {
-  enabled: false,
+  enabled: true,
   movement: {
-    enabled: false,
+    enabled: true,
     speedBaseMax: 0.8,
     speedAmplifierMultiplier: 0.15,
     speedBufferThreshold: 5,
@@ -12,14 +12,14 @@ export const Config = {
     phaseBufferThreshold: 5
   },
   combat: {
-    enabled: false,
+    enabled: true,
     maxCpsLimit: 15,
     criticalCpsLimit: 20,
     baseReachLimit: 5.2,
     criticalReachLimit: 6.5
   },
   inventory: {
-    enabled: false,
+    enabled: true,
     checkInterval: 100,
     chestStealerWindowMs: 500,
     chestStealerBurstThreshold: 5,

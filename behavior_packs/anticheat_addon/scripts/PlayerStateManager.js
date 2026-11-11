@@ -1,15 +1,16 @@
 import { ErrorReporter } from "./ErrorReporter.js";
 import { system } from "@minecraft/server";
+import { playerKey } from "./Identity.js";
 
 export class PlayerStateManager {
   static states = new Map();
 
   static updateState(player) {
-    const name = player.name;
+    const key = playerKey(player);
     const currentLoc = player.location;
     const now = Date.now();
     
-    let state = this.states.get(name);
+    let state = this.states.get(key);
     if (!state) {
       state = {
         history: [],
@@ -46,20 +47,20 @@ export class PlayerStateManager {
     state.lastUpdate = now;
     state.lastYaw = rotation.y;
     state.lastPitch = rotation.x;
-    this.states.set(name, state);
+    this.states.set(key, state);
   }
 
-  static getState(playerName) {
-    return this.states.get(playerName);
+  static getState(key) {
+    return this.states.get(key);
   }
 
-  static getPreviousLoc(playerName) {
-    const state = this.states.get(playerName);
+  static getPreviousLoc(key) {
+    const state = this.states.get(key);
     if (!state || state.history.length < 2) return null;
     return state.history[state.history.length - 2];
   }
 
-  static clearPlayer(playerName) {
-    this.states.delete(playerName);
+  static clearPlayer(key) {
+    this.states.delete(key);
   }
 }

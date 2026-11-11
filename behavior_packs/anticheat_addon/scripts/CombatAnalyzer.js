@@ -17,11 +17,13 @@ import { CriticalDamageRulesetProvider } from "./features/criticals/CriticalDama
 import { AutoTotemFeatureExtractor } from "./features/equipment/AutoTotemFeatureExtractor.js";
 import { AutoArmorFeatureExtractor } from "./features/equipment/AutoArmorFeatureExtractor.js";
 import { InventoryRevisionTracker } from "./features/equipment/InventoryRevisionTracker.js";
+import { playerKey, rememberPlayer } from "./Identity.js";
 
 const kickCounts = new Map();
 function kickPlayer(player, reason) {
-  const count = (kickCounts.get(player.name) || 0) + 1;
-  kickCounts.set(player.name, count);
+  const key = playerKey(player);
+  const count = (kickCounts.get(key) || 0) + 1;
+  kickCounts.set(key, count);
   // SHADOW MODE: Kicks are disabled. Gemma will analyze and report instead.
   if (count % 10 === 1) {
     console.warn(`[Shadow Mode] Se detectó comportamiento kickeable para ${player.name}: ${reason} (Alerta ${count}/10)`);
@@ -53,17 +55,18 @@ export class CombatAnalyzer {
       const gameMode = attacker.getGameMode ? attacker.getGameMode() : "survival";
       if (gameMode === "creative" || gameMode === "spectator") return;
 
-      const name = attacker.name;
+      const key = playerKey(attacker);
+      rememberPlayer(attacker);
       const now = Date.now();
       
       const locA = attacker.location;
       const locV = victim.location;
 
       // 1. Detección de CPS y Multi-Aura (Killaura)
-      let attacks = this.hitRecords.get(name) || [];
+      let attacks = this.hitRecords.get(key) || [];
       attacks = attacks.filter(hit => now - hit.ts < 1000);
       attacks.push({ ts: now, target: victim.id, isPlayer: victim.typeId === "minecraft:player" });
-      this.hitRecords.set(name, attacks);
+      this.hitRecords.set(key, attacks);
 
       const cps = attacks.length;
       if (cps > Config.combat.maxCpsLimit) {
@@ -108,8 +111,8 @@ export class CombatAnalyzer {
       // 2. Detección Avanzada de Reach (ReachDetector v2)
       let dist = 0;
       try {
-        const aHistory = TelemetryManager.getHistory(attacker.name) || [];
-        const vHistory = TelemetryManager.getHistory(victim.name) || [];
+        const aHistory = TelemetryManager.getHistory(attacker.id) || [];
+        const vHistory = TelemetryManager.getHistory(victim.id) || [];
         
         let aVel = { x: 0, y: 0, z: 0 };
         let vVel = { x: 0, y: 0, z: 0 };
@@ -154,7 +157,7 @@ export class CombatAnalyzer {
 
       // 2.2. Detección de Aim y Look Rotations (Shadow Mode Extractor)
       try {
-        const aHistory = TelemetryManager.getHistory(attacker.name) || [];
+        const aHistory = TelemetryManager.getHistory(attacker.id) || [];
         // Calculate Target Bearing Yaw
         const dx = victim.location.x - attacker.location.x;
         const dz = victim.location.z - attacker.location.z;
@@ -191,7 +194,7 @@ export class CombatAnalyzer {
             targetVolumeMaxYaw: tYaw + 15, 
             isHitTick: h === aHistory[aHistory.length - 1] 
           })),
-          combatSessionId: CombatAnalyzer.combatTags.get(attacker.name) || "session_1",
+          combatSessionId: CombatAnalyzer.combatTags.get(key) || "session_1",
           attackSequence: Date.now().toString(),
           targetId: victim.id,
           inputContextEpoch: 1
@@ -211,10 +214,10 @@ export class CombatAnalyzer {
         const triggerInput = {
           attackTick: currentTick,
           targetVolumeHistory: aHistory.map(h => ({ tick: h.timestamp || currentTick, intersects: true, distance: dist })),
-          combatContext: { events: CombatAnalyzer.hitRecords.get(attacker.name) || [] }
+          combatContext: { events: CombatAnalyzer.hitRecords.get(key) || [] }
         };
         const triggerFeatures = extractTriggerFeatures(triggerInput.combatContext.events, {
-          combatSessionId: CombatAnalyzer.combatTags.get(attacker.name) || "session_1",
+          combatSessionId: CombatAnalyzer.combatTags.get(key) || "session_1",
           targetId: "target",
           timeBucket: 0,
           targetInLineOfSight: true
@@ -255,7 +258,7 @@ export class CombatAnalyzer {
           })),
           context: { isMultiTarget: false, falsePositiveRisk: 0.0, inputEpochTicks: 100 }
         };
-        autoWeaponInput.context.combatSessionId = CombatAnalyzer.combatTags.get(attacker.name) || "session_1";
+        autoWeaponInput.context.combatSessionId = CombatAnalyzer.combatTags.get(key) || "session_1";
         const autoWeaponFeatures = extractAutoWeaponFeatures(autoWeaponInput.snapshots, autoWeaponInput.context);
         if (autoWeaponFeatures && autoWeaponFeatures.evidences && autoWeaponFeatures.evidences.length > 0) {
           const formattedPacket = EvidencePacketBuilder.build({
@@ -297,7 +300,7 @@ export class CombatAnalyzer {
           }
 
           // Fase 4: Extracción de Features (Dinámica de rotación - Snap Aim)
-          const history = TelemetryManager.getHistory(name);
+          const history = TelemetryManager.getHistory(attacker.id);
           if (history.length >= 5) {
             const recent = history.slice(-5);
             let maxDeltaYaw = 0;
@@ -333,16 +336,16 @@ export class CombatAnalyzer {
               CombatAnalyzer.criticalsWindow.addEvent({
                 type: "attack",
                 tick: system.currentTick || Date.now(),
-                attackerId: name,
-                targetId: victim.name,
+                attackerId: key,
+                targetId: victim.id,
                 hasGroundSupport: attacker.isOnGround,
                 velocity: { x: 0, y: attacker.getVelocity ? attacker.getVelocity().y : 0, z: 0 }
               });
               CombatAnalyzer.criticalsWindow.addEvent({
                 type: "damage",
                 tick: system.currentTick || Date.now(),
-                sourceId: name,
-                targetId: victim.name,
+                sourceId: key,
+                targetId: victim.id,
                 damage: 10 // Simplified mock for hitting
               });
               
@@ -362,8 +365,8 @@ export class CombatAnalyzer {
             // --- EQUIPMENT EXTRACTOR (Shadow Mode) ---
             try {
               const health = attacker.getComponent('minecraft:health')?.currentValue || 20;
-              CombatAnalyzer.autoTotemExtractor.updateCombatState(name, system.currentTick || Date.now(), health);
-              CombatAnalyzer.autoArmorExtractor.updateCombatState(name, system.currentTick || Date.now());
+              CombatAnalyzer.autoTotemExtractor.updateCombatState(key, system.currentTick || Date.now(), health);
+              CombatAnalyzer.autoArmorExtractor.updateCombatState(key, system.currentTick || Date.now());
               
               const equippable = attacker.getComponent('minecraft:equippable');
               const realInv = equippable ? {
@@ -374,9 +377,9 @@ export class CombatAnalyzer {
                 'offhand': equippable.getEquipment(EquipmentSlot.Offhand)?.typeId || ''
               } : {};
               
-              const revision = CombatAnalyzer.inventoryTracker.updateSnapshot(name, system.currentTick || Date.now(), realInv);
-              const totemFeatures = CombatAnalyzer.autoTotemExtractor.extractFeatures(name, revision);
-              const armorFeatures = CombatAnalyzer.autoArmorExtractor.extractFeatures(name, revision);
+              const revision = CombatAnalyzer.inventoryTracker.updateSnapshot(key, system.currentTick || Date.now(), realInv);
+              const totemFeatures = CombatAnalyzer.autoTotemExtractor.extractFeatures(key, revision);
+              const armorFeatures = CombatAnalyzer.autoArmorExtractor.extractFeatures(key, revision);
               
               const evidenceList = [];
               if (totemFeatures && totemFeatures.autoTotem.features.length > 0) evidenceList.push({ type: "AUTOTOTEM_CANDIDATE_DETECTED", score: 1.0 });
@@ -439,8 +442,9 @@ export class CombatAnalyzer {
       // 3. Combat Tag (Anti-Combat Log)
       if (victim.typeId === "minecraft:player") {
         const combatTime = now + 10000; // 10 segundos
-        this.combatTags.set(attacker.name, combatTime);
-        this.combatTags.set(victim.name, combatTime);
+        rememberPlayer(victim);
+        this.combatTags.set(key, combatTime);
+        this.combatTags.set(playerKey(victim), combatTime);
 
         // Mensaje discreto en actionbar para recordarles que están en combate
         try {
@@ -459,18 +463,18 @@ export class CombatAnalyzer {
     } catch (e) { ErrorReporter.report(e, { addonId: "anticheat_addon", moduleId: "CombatAnalyzer.js", operation: "try-catch", category: "runtime" });}
   }
 
-  static isInCombat(playerName) {
-    const expires = this.combatTags.get(playerName);
+  static isInCombat(key) {
+    const expires = this.combatTags.get(key);
     if (!expires) return false;
     if (Date.now() > expires) {
-      this.combatTags.delete(playerName);
+      this.combatTags.delete(key);
       return false;
     }
     return true;
   }
 
-  static clearPlayer(playerName) {
-    this.hitRecords.delete(playerName);
-    this.combatTags.delete(playerName);
+  static clearPlayer(key) {
+    this.hitRecords.delete(key);
+    this.combatTags.delete(key);
   }
 }

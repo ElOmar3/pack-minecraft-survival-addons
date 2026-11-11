@@ -229,7 +229,7 @@ export class ModerationService {
   }
 
   readRecord(player, key) {
-    try { const raw = globalThis.__sqlite_get_prop_v2__("fcx_limited_admin", player, key); return raw ? JSON.parse(String(raw)) : null; } catch { return null; }
+    try { const raw = globalThis.__sqlite_get_prop_v2__("fcx_limited_admin", player, key); return raw ? globalThis.__sqlite_read_json_v3__(raw) : null; } catch { return null; }
   }
 
   registerEnforcement() {

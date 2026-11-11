@@ -9,6 +9,9 @@ import { ActionFormData } from "@minecraft/server-ui";
 
 // === PERSISTENCIA SQLITE PUENTE V3 (SEGURO PARA /reload) ===
 if (!globalThis.__sqlite_store_v2__) globalThis.__sqlite_store_v2__ = new Map();
+if (!globalThis.__sqlite_write_ts_v3__) globalThis.__sqlite_write_ts_v3__ = new Map();
+if (!globalThis.__sqlite_pending_v3__) globalThis.__sqlite_pending_v3__ = new Map();
+if (!globalThis.__sqlite_unflushed_v3__) globalThis.__sqlite_unflushed_v3__ = new Map();
 if (!globalThis.__sqlite_owner_key_v2__) {
   globalThis.__sqlite_owner_key_v2__ = function(owner) {
     if (typeof owner === "string") return owner;
@@ -26,6 +29,18 @@ if (!globalThis.__sqlite_get_prop_v2__) {
     return ownerStore ? ownerStore[key] : undefined;
   };
 }
+// Lector tolerante: el demonio rehidrata objetos ya parseados; los datos legacy son strings JSON.
+if (!globalThis.__sqlite_read_json_v3__) {
+  globalThis.__sqlite_read_json_v3__ = function(raw, fallback) {
+    const fb = fallback === undefined ? null : fallback;
+    if (raw === undefined || raw === null) return fb;
+    if (typeof raw === "object") return raw;
+    if (typeof raw !== "string") return raw;
+    const text = raw.trim();
+    if (!text) return fb;
+    try { return JSON.parse(text); } catch (e) { return fb; }
+  };
+}
 if (!globalThis.__sqlite_set_prop_v2__) {
   globalThis.__sqlite_set_prop_v2__ = function(addon, owner, key, value) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
@@ -38,7 +53,21 @@ if (!globalThis.__sqlite_set_prop_v2__) {
     const payload = { addon: addonKey, owner: ownerKey, key };
     if (value === undefined) { delete ownerStore[key]; payload.deleted = true; }
     else { ownerStore[key] = value; payload.deleted = false; payload.value = value; }
-    try { console.warn("[SQLITE_SAVE_V1] " + JSON.stringify(payload)); } catch (e) {}
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    globalThis.__sqlite_write_ts_v3__.set(compositeKey, Date.now());
+    try {
+      const line = "[SQLITE_SAVE_V1] " + JSON.stringify(payload);
+      // Gating: las escrituras previas a sync_complete se encolan y se emiten al confirmar el snapshot.
+      if (globalThis.__sqlite_is_ready_v3__(addonKey)) console.warn(line);
+      else {
+        let queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+        if (!queue) { queue = []; globalThis.__sqlite_pending_v3__.set(addonKey, queue); }
+        queue.push(line);
+        let marks = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+        if (!marks) { marks = new Set(); globalThis.__sqlite_unflushed_v3__.set(addonKey, marks); }
+        marks.add(compositeKey);
+      }
+    } catch (e) {}
   };
 }
 if (!globalThis.__sqlite_rehydrate_v2__) {
@@ -46,6 +75,13 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
     const addonKey = String(addon);
     const ownerKey = globalThis.__sqlite_owner_key_v2__(owner);
+    // Versionado: una escritura local posterior a la solicitud de sync (o aún no drenada al demonio) gana sobre el snapshot.
+    const status = globalThis.__sqlite_sync_status_v3__.get(addonKey);
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    const writeTs = globalThis.__sqlite_write_ts_v3__.get(compositeKey);
+    const unflushed = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+    if (unflushed && unflushed.has(compositeKey)) return;
+    if (status && status.requestedAt !== undefined && writeTs !== undefined && writeTs >= status.requestedAt) return;
     let addonStore = globalThis.__sqlite_store_v2__.get(addonKey);
     if (!addonStore) { addonStore = new Map(); globalThis.__sqlite_store_v2__.set(addonKey, addonStore); }
     let ownerStore = addonStore.get(ownerKey);
@@ -56,16 +92,35 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
 }
 if (!globalThis.__sqlite_sync_complete_v2__) globalThis.__sqlite_sync_complete_v2__ = new Map();
 if (!globalThis.__sqlite_sync_status_v3__) globalThis.__sqlite_sync_status_v3__ = new Map();
+if (!globalThis.__sqlite_is_ready_v3__) {
+  globalThis.__sqlite_is_ready_v3__ = function(addon) {
+    const status = globalThis.__sqlite_sync_status_v3__.get(String(addon));
+    return Boolean(status && (status.complete || status.degraded));
+  };
+}
+if (!globalThis.__sqlite_flush_pending_v3__) {
+  globalThis.__sqlite_flush_pending_v3__ = function(addon) {
+    const addonKey = String(addon);
+    const queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+    if (!queue || queue.length === 0) return;
+    globalThis.__sqlite_pending_v3__.delete(addonKey);
+    globalThis.__sqlite_unflushed_v3__.delete(addonKey);
+    for (const line of queue) { try { console.warn(line); } catch (e) {} }
+  };
+}
 if (!globalThis.__sqlite_request_sync_v3__) {
   globalThis.__sqlite_request_sync_v3__ = function(addon, attempt) {
     const addonKey = String(addon || "");
     if (!addonKey) return;
     const previous = globalThis.__sqlite_sync_status_v3__.get(addonKey) || {};
+    // Conservar la ventana original en reintentos para que el guard de versión no se relaje.
+    const keepWindow = previous.requestedAt && !previous.complete && !previous.degraded;
     globalThis.__sqlite_sync_status_v3__.set(addonKey, {
       ...previous,
-      requestedAt: Date.now(),
+      requestedAt: keepWindow ? previous.requestedAt : Date.now(),
       attempt: Number(attempt || 0),
       complete: false,
+      degraded: false,
       protocol: 0,
     });
     try { console.warn("[SQLITE_REQUEST_SYNC] " + JSON.stringify({ addon: addonKey, protocol: 3, attempt: Number(attempt || 0) })); } catch (e) {}
@@ -77,6 +132,8 @@ try {
   if (!globalThis.__sqlite_listener_callback_v3__) {
     const callback = function(event) {
     if (!event || (event.id !== "sqlite:load" && event.id !== "sqlite:sync" && event.id !== "sqlite:load_chunk" && event.id !== "sqlite:sync_complete")) return;
+    // Solo el demonio (consola del servidor) puede rehidratar; un jugador jamás debe inyectar estado.
+    if (event.sourceEntity && event.sourceEntity.typeId === "minecraft:player") return;
     try {
       const payload = JSON.parse(event.message || "{}");
       if (event.id === "sqlite:sync_complete") {
@@ -91,13 +148,14 @@ try {
             protocol: Number(payload.protocol || 0),
             entryCount: Number(payload.entryCount || 0),
           });
+          globalThis.__sqlite_flush_pending_v3__(addonKey);
         }
         return;
       }
       if (event.id === "sqlite:load_chunk") {
         const count = Number(payload.chunkCount);
         const index = Number(payload.chunkIndex);
-        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 128 || !Number.isInteger(index) || index < 0 || index >= count) return;
+        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 4096 || !Number.isInteger(index) || index < 0 || index >= count) return;
         const chunkKey = String(payload.chunkId);
         let state = globalThis.__sqlite_chunk_store_v2__.get(chunkKey);
         if (!state || state.count !== count) {
@@ -132,6 +190,17 @@ system.runTimeout(() => {
     if (!state || Number(state.protocol || 0) < 3) globalThis.__sqlite_request_sync_v3__("jobs_addon", 1);
   } catch (e) {}
 }, 120);
+system.runTimeout(() => {
+  // Sin demonio (mundo importado sin bridge) se opera en modo degradado tras ~10s: RAM es la fuente de verdad.
+  try {
+    const state = globalThis.__sqlite_sync_status_v3__.get("jobs_addon");
+    if (state && !state.complete) {
+      state.degraded = true;
+      globalThis.__sqlite_sync_complete_v2__.set("jobs_addon", Date.now());
+      globalThis.__sqlite_flush_pending_v3__("jobs_addon");
+    }
+  } catch (e) {}
+}, 200);
 // === FIN PERSISTENCIA SQLITE PUENTE V3 ===
 
 // ============================================================================
@@ -152,7 +221,7 @@ const ORE_BLOCK_IDS = new Set([
   "minecraft:lapis_ore", "minecraft:deepslate_lapis_ore",
   "minecraft:diamond_ore", "minecraft:deepslate_diamond_ore",
   "minecraft:emerald_ore", "minecraft:deepslate_emerald_ore",
-  "minecraft:nether_quartz_ore", "minecraft:nether_gold_ore"
+  "minecraft:quartz_ore", "minecraft:nether_gold_ore"
 ]);
 
 const CROP_TYPE_MAP = new Map([
@@ -164,6 +233,8 @@ const CROP_TYPE_MAP = new Map([
 
 try {
   world.beforeEvents.playerBreakBlock.subscribe((event) => {
+    // Protection se suscribe antes (orden de carga): si canceló la ruptura, ninguna pasiva debe ejecutarse.
+    if (event.cancel) return;
     const player = event.player;
     if (!player || !player.isValid) return;
 
@@ -212,10 +283,13 @@ try {
 
         system.run(() => {
           try {
+            const protectionCheck = typeof globalThis.__protection_check_v1__ === "function" ? globalThis.__protection_check_v1__ : null;
             let chopped = 0;
             for (let dy = 1; dy <= 16; dy++) {
               const upperBlock = dim.getBlock({ x: startX, y: startY + dy, z: startZ });
               if (upperBlock && LOG_BLOCK_IDS.has(upperBlock.typeId)) {
+                // setType no dispara playerBreakBlock: revalidar la zona de cada tronco superior.
+                if (protectionCheck && !protectionCheck(player, { x: startX, y: startY + dy, z: startZ }, dim.id, "break")) break;
                 const logType = upperBlock.typeId;
                 upperBlock.setType("minecraft:air");
                 dim.spawnItem(new ItemStack(logType, 1), { x: startX + 0.5, y: startY + 0.5, z: startZ + 0.5 });
@@ -241,6 +315,9 @@ try {
 
       system.runTimeout(() => {
         try {
+          if (!player.isValid) return;
+          const protectionCheck = typeof globalThis.__protection_check_v1__ === "function" ? globalThis.__protection_check_v1__ : null;
+          if (protectionCheck && !protectionCheck(player, cropLoc, dim.id, "place")) return;
           const floorBlock = dim.getBlock({ x: cropLoc.x, y: cropLoc.y - 1, z: cropLoc.z });
           const currentBlock = dim.getBlock(cropLoc);
           if (floorBlock?.typeId === "minecraft:farmland" && currentBlock?.isAir) {
@@ -512,7 +589,7 @@ function getEmissionBudget(player) {
       if (storedDay !== -1) return { day, earned: 0 };
       const raw = globalThis.__sqlite_get_prop_v2__("jobs_addon", player, "economy_emission_budget_v1");
       if (!raw) return { day, earned: 0 };
-      const legacy = JSON.parse(String(raw));
+      const legacy = globalThis.__sqlite_read_json_v3__(raw);
       const legacyEarned = Number(legacy?.earned);
       if (Number(legacy?.day) !== day || !Number.isSafeInteger(legacyEarned) || legacyEarned < 0 || legacyEarned > ECONOMY_DAILY_EMISSION_LIMIT) return null;
       dayObjective.setScore(player, day);
@@ -602,7 +679,7 @@ function getActiveJob(player) {
 function loadJobStats(player) {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("jobs_addon", player, JOB_STATS_PROPERTY_KEY);
-    const parsed = raw ? JSON.parse(String(raw)) : {};
+    const parsed = raw ? globalThis.__sqlite_read_json_v3__(raw) : {};
     return {
       totalDeliveries: Math.max(0, Number(parsed.totalDeliveries) || 0),
       streak: Math.max(0, Number(parsed.streak) || 0),
@@ -625,7 +702,7 @@ function saveJobStats(player, stats) {
 function loadTask(player) {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("jobs_addon", player, JOB_TASK_PROPERTY_KEY);
-    return raw ? JSON.parse(String(raw)) : null;
+    return raw ? globalThis.__sqlite_read_json_v3__(raw) : null;
   } catch (e) { ErrorReporter.report(e, { addonId: "jobs_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
     return null;
   }
@@ -725,7 +802,7 @@ function setActiveJob(player, jobId) {
 function loadStations() {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("jobs_addon", "world", JOB_STATIONS_KEY);
-    return raw ? JSON.parse(String(raw)) : [];
+    return raw ? globalThis.__sqlite_read_json_v3__(raw) : [];
   } catch (e) { ErrorReporter.report(e, { addonId: "jobs_addon", moduleId: "main.js", operation: "try-catch", category: "runtime" });
     return [];
   }

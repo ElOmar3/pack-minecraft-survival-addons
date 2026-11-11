@@ -42,59 +42,22 @@ export class AdminIdentityResolver {
   }
 
   resolve(player) {
-    const isOp = (() => {
-      if (!player) return false;
-      try { if (player.playerPermissionLevel === 2 || player.playerPermissionLevel === "Operator") return true; } catch {}
-      try { if (player.hasTag("op") || player.hasTag("OP") || player.hasTag("admin") || player.hasTag("Admin") || player.hasTag("owner") || player.hasTag("Owner")) return true; } catch {}
-      return false;
-    })();
-
+    // La autoridad administrativa depende exclusivamente del token criptográfico
+    // aprovisionado y su binding. Los tags vanilla (op/admin/owner) y el nivel de
+    // operador NO otorgan identidad: un op sin token enrolado no es administrador.
     const token = this.readToken(player);
     if (!token) {
-      if (isOp) {
-        return ok(Object.freeze({
-          principalId: "op_fallback_" + safeName(player).toLowerCase(),
-          identitySource: "OPERATOR_FALLBACK",
-          entityIdSnapshot: safeEntityId(player),
-          playerNameSnapshot: safeName(player),
-          role: "OWNER",
-          policyVersion: this.registry.policyVersion(),
-          record: { role: "OWNER", principalId: "op_fallback_" + safeName(player).toLowerCase() }
-        }));
-      }
       return fail(AdminErrorCode.IDENTITY_UNAVAILABLE);
     }
     const principalId = sha256(token);
     const record = this.registry.findActiveByPrincipalId(principalId);
     if (!record) {
       if (this.registry.isRevoked(principalId)) return fail(AdminErrorCode.TOKEN_REVOKED);
-      if (isOp) {
-        return ok(Object.freeze({
-          principalId,
-          identitySource: "OPERATOR_FALLBACK",
-          entityIdSnapshot: safeEntityId(player),
-          playerNameSnapshot: safeName(player),
-          role: "OWNER",
-          policyVersion: this.registry.policyVersion(),
-          record: { role: "OWNER", principalId }
-        }));
-      }
       return fail(AdminErrorCode.ACTOR_NOT_REGISTERED);
     }
     let binding = "";
     try { binding = String(globalThis.__sqlite_get_prop_v2__("fcx_limited_admin", player, BINDING_PROPERTY) ?? ""); } catch {}
     if (!/^[0-9a-f]{64}$/.test(binding) || !constantTimeEqual(sha256(binding), String(record.bindingHash ?? ""))) {
-      if (isOp) {
-        return ok(Object.freeze({
-          principalId,
-          identitySource: "OPERATOR_FALLBACK",
-          entityIdSnapshot: safeEntityId(player),
-          playerNameSnapshot: safeName(player),
-          role: record.role || "OWNER",
-          policyVersion: this.registry.policyVersion(),
-          record
-        }));
-      }
       return fail(AdminErrorCode.IDENTITY_UNAVAILABLE);
     }
     const currentEntityId = safeEntityId(player);

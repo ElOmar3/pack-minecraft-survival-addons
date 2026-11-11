@@ -18,10 +18,11 @@ export class AuthorizationService {
   authorize(actor, capability, target = undefined, options = {}) {
     if (!this.config.enabled) return fail(AdminErrorCode.ADMIN_DISABLED);
     if (!actor || !actor.principalId || !isKnownRole(actor.role)) return fail(AdminErrorCode.ACTOR_NOT_REGISTERED);
-    const isFallbackOwner = actor.role === Role.OWNER || actor.identitySource === "OPERATOR_FALLBACK";
+    // Sin fallback de operador: todo actor autorizado debe tener un registro activo
+    // en el registry cuyo rol coincida con la identidad resuelta por token.
     const current = this.registry.findActiveByPrincipalId(actor.principalId);
-    if (!current && !isFallbackOwner) return fail(AdminErrorCode.ADMIN_SESSION_REVOKED);
-    if (current && current.role !== actor.role && !isFallbackOwner) return fail(AdminErrorCode.ADMIN_SESSION_REVOKED);
+    if (!current) return fail(AdminErrorCode.ADMIN_SESSION_REVOKED);
+    if (current.role !== actor.role) return fail(AdminErrorCode.ADMIN_SESSION_REVOKED);
     if (this.registry.isSuspended(actor.principalId)) return fail(AdminErrorCode.ADMIN_SESSION_REVOKED);
     if (this.registry.isLocked() && actor.role !== Role.OWNER && MUTATING_CAPABILITIES.has(capability)) {
       return fail(AdminErrorCode.ADMIN_LOCKDOWN_ACTIVE);

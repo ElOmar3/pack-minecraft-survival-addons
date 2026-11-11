@@ -3,11 +3,13 @@ import { EquipmentSlot } from "@minecraft/server";
 import { Config } from "./Config.js";
 import { ExemptionManager } from "./ExemptionManager.js";
 import { ViolationManager } from "./ViolationManager.js";
+import { playerKey } from "./Identity.js";
 
 const kickCounts = new Map();
 function kickPlayer(player, reason) {
-  const count = (kickCounts.get(player.name) || 0) + 1;
-  kickCounts.set(player.name, count);
+  const key = playerKey(player);
+  const count = (kickCounts.get(key) || 0) + 1;
+  kickCounts.set(key, count);
   // SHADOW MODE: Kicks are disabled. Gemma will analyze and report instead.
   if (count % 10 === 1) {
     console.warn(`[Shadow Mode] Se detectó comportamiento kickeable para ${player.name}: ${reason} (Alerta ${count}/10)`);
@@ -127,7 +129,7 @@ export class InventoryAnalyzer {
     const typeId = String(block.typeId || "").toLowerCase();
     if (!this.CONTAINER_BLOCK_FRAGMENTS.some((fragment) => typeId.includes(fragment))) return;
 
-    this.containerOpenRecords.set(player.name, {
+    this.containerOpenRecords.set(playerKey(player), {
       ts: Date.now(),
       block: typeId,
       snapshot: this.getInventorySummary(player)
@@ -140,12 +142,13 @@ export class InventoryAnalyzer {
   }
 
   static analyzeContainerLooting(player) {
-    const record = this.containerOpenRecords.get(player.name);
+    const key = playerKey(player);
+    const record = this.containerOpenRecords.get(key);
     if (!record) return;
 
     const age = Date.now() - record.ts;
     if (age > Config.inventory.chestStealerWindowMs) {
-      this.containerOpenRecords.delete(player.name);
+      this.containerOpenRecords.delete(key);
       return;
     }
 
@@ -162,11 +165,11 @@ export class InventoryAnalyzer {
         18,
         { block: record.block, occupiedDelta, distinctDelta, windowMs: age }
       );
-      this.containerOpenRecords.delete(player.name);
+      this.containerOpenRecords.delete(key);
       return;
     }
 
-    this.containerOpenRecords.set(player.name, { ...record, snapshot: current });
+    this.containerOpenRecords.set(key, { ...record, snapshot: current });
   }
 
   static analyzeInventory(player) {
@@ -283,7 +286,7 @@ export class InventoryAnalyzer {
       return;
     }
 
-    const name = player.name;
+    const name = playerKey(player);
     const now = Date.now();
     const heldItem = (() => {
       try {
@@ -358,7 +361,7 @@ export class InventoryAnalyzer {
     if (gameMode === "creative") return;
     if (ExemptionManager.isPlayerSoftExempt(player)) return;
 
-    const name = player.name;
+    const name = playerKey(player);
     const now = Date.now();
     const loc = player.location;
     const blockLoc = block.location;
@@ -410,10 +413,10 @@ export class InventoryAnalyzer {
     }
   }
 
-  static clearPlayer(playerName) {
-    this.breakRecords.delete(playerName);
-    this.placeRecords.delete(playerName);
-    this.inventorySnapshots.delete(playerName);
-    this.containerOpenRecords.delete(playerName);
+  static clearPlayer(key) {
+    this.breakRecords.delete(key);
+    this.placeRecords.delete(key);
+    this.inventorySnapshots.delete(key);
+    this.containerOpenRecords.delete(key);
   }
 }

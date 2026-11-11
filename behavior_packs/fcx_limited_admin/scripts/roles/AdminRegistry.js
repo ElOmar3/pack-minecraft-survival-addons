@@ -36,7 +36,7 @@ export class AdminRegistry {
         this.ready = true;
         return { ok: true, created: true };
       }
-      const parsed = typeof raw === "object" ? raw : JSON.parse(String(raw));
+      const parsed = typeof raw === "object" ? raw : globalThis.__sqlite_read_json_v3__(raw);
       if (parsed?.schemaVersion !== 1 || !Array.isArray(parsed.administrators) || !Array.isArray(parsed.revokedPrincipalIds)) throw new Error("registry_schema_invalid");
       if (!Number.isSafeInteger(parsed.policyVersion) || parsed.policyVersion < 1) throw new Error("policy_version_invalid");
       parsed.adminSystemLocked = Boolean(this.config.adminSystemLocked);

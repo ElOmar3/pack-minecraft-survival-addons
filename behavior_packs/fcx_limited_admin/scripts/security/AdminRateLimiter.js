@@ -13,7 +13,7 @@ export class AdminRateLimiter {
   load() {
     const raw = this.store.get(RATE_KEY);
     if (raw === undefined) return { schemaVersion: 1, buckets: {} };
-    const parsed = JSON.parse(String(raw));
+    const parsed = globalThis.__sqlite_read_json_v3__(raw);
     if (parsed?.schemaVersion !== 1 || !parsed.buckets || typeof parsed.buckets !== "object" || Array.isArray(parsed.buckets)) throw new Error("rate_limit_state_invalid");
     for (const [key, timestamps] of Object.entries(parsed.buckets)) {
       if (key.length > 192 || !Array.isArray(timestamps) || timestamps.some((value) => !Number.isSafeInteger(value) || value < 0)) throw new Error("rate_limit_bucket_invalid");

@@ -19,6 +19,9 @@ import { ActionFormData, ModalFormData, MessageFormData } from "@minecraft/serve
 
 // === PERSISTENCIA SQLITE PUENTE V3 (SEGURO PARA /reload) ===
 if (!globalThis.__sqlite_store_v2__) globalThis.__sqlite_store_v2__ = new Map();
+if (!globalThis.__sqlite_write_ts_v3__) globalThis.__sqlite_write_ts_v3__ = new Map();
+if (!globalThis.__sqlite_pending_v3__) globalThis.__sqlite_pending_v3__ = new Map();
+if (!globalThis.__sqlite_unflushed_v3__) globalThis.__sqlite_unflushed_v3__ = new Map();
 if (!globalThis.__sqlite_owner_key_v2__) {
   globalThis.__sqlite_owner_key_v2__ = function(owner) {
     if (typeof owner === "string") return owner;
@@ -36,6 +39,18 @@ if (!globalThis.__sqlite_get_prop_v2__) {
     return ownerStore ? ownerStore[key] : undefined;
   };
 }
+// Lector tolerante: el demonio rehidrata objetos ya parseados; los datos legacy son strings JSON.
+if (!globalThis.__sqlite_read_json_v3__) {
+  globalThis.__sqlite_read_json_v3__ = function(raw, fallback) {
+    const fb = fallback === undefined ? null : fallback;
+    if (raw === undefined || raw === null) return fb;
+    if (typeof raw === "object") return raw;
+    if (typeof raw !== "string") return raw;
+    const text = raw.trim();
+    if (!text) return fb;
+    try { return JSON.parse(text); } catch (e) { return fb; }
+  };
+}
 if (!globalThis.__sqlite_set_prop_v2__) {
   globalThis.__sqlite_set_prop_v2__ = function(addon, owner, key, value) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
@@ -48,7 +63,21 @@ if (!globalThis.__sqlite_set_prop_v2__) {
     const payload = { addon: addonKey, owner: ownerKey, key };
     if (value === undefined) { delete ownerStore[key]; payload.deleted = true; }
     else { ownerStore[key] = value; payload.deleted = false; payload.value = value; }
-    try { console.warn("[SQLITE_SAVE_V1] " + JSON.stringify(payload)); } catch (e) {}
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    globalThis.__sqlite_write_ts_v3__.set(compositeKey, Date.now());
+    try {
+      const line = "[SQLITE_SAVE_V1] " + JSON.stringify(payload);
+      // Gating: las escrituras previas a sync_complete se encolan y se emiten al confirmar el snapshot.
+      if (globalThis.__sqlite_is_ready_v3__(addonKey)) console.warn(line);
+      else {
+        let queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+        if (!queue) { queue = []; globalThis.__sqlite_pending_v3__.set(addonKey, queue); }
+        queue.push(line);
+        let marks = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+        if (!marks) { marks = new Set(); globalThis.__sqlite_unflushed_v3__.set(addonKey, marks); }
+        marks.add(compositeKey);
+      }
+    } catch (e) {}
   };
 }
 if (!globalThis.__sqlite_rehydrate_v2__) {
@@ -56,6 +85,13 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
     if (!addon || owner === undefined || owner === null || key === undefined) return;
     const addonKey = String(addon);
     const ownerKey = globalThis.__sqlite_owner_key_v2__(owner);
+    // Versionado: una escritura local posterior a la solicitud de sync (o aún no drenada al demonio) gana sobre el snapshot.
+    const status = globalThis.__sqlite_sync_status_v3__.get(addonKey);
+    const compositeKey = addonKey + "\u0000" + ownerKey + "\u0000" + String(key);
+    const writeTs = globalThis.__sqlite_write_ts_v3__.get(compositeKey);
+    const unflushed = globalThis.__sqlite_unflushed_v3__.get(addonKey);
+    if (unflushed && unflushed.has(compositeKey)) return;
+    if (status && status.requestedAt !== undefined && writeTs !== undefined && writeTs >= status.requestedAt) return;
     let addonStore = globalThis.__sqlite_store_v2__.get(addonKey);
     if (!addonStore) { addonStore = new Map(); globalThis.__sqlite_store_v2__.set(addonKey, addonStore); }
     let ownerStore = addonStore.get(ownerKey);
@@ -66,16 +102,35 @@ if (!globalThis.__sqlite_rehydrate_v2__) {
 }
 if (!globalThis.__sqlite_sync_complete_v2__) globalThis.__sqlite_sync_complete_v2__ = new Map();
 if (!globalThis.__sqlite_sync_status_v3__) globalThis.__sqlite_sync_status_v3__ = new Map();
+if (!globalThis.__sqlite_is_ready_v3__) {
+  globalThis.__sqlite_is_ready_v3__ = function(addon) {
+    const status = globalThis.__sqlite_sync_status_v3__.get(String(addon));
+    return Boolean(status && (status.complete || status.degraded));
+  };
+}
+if (!globalThis.__sqlite_flush_pending_v3__) {
+  globalThis.__sqlite_flush_pending_v3__ = function(addon) {
+    const addonKey = String(addon);
+    const queue = globalThis.__sqlite_pending_v3__.get(addonKey);
+    if (!queue || queue.length === 0) return;
+    globalThis.__sqlite_pending_v3__.delete(addonKey);
+    globalThis.__sqlite_unflushed_v3__.delete(addonKey);
+    for (const line of queue) { try { console.warn(line); } catch (e) {} }
+  };
+}
 if (!globalThis.__sqlite_request_sync_v3__) {
   globalThis.__sqlite_request_sync_v3__ = function(addon, attempt) {
     const addonKey = String(addon || "");
     if (!addonKey) return;
     const previous = globalThis.__sqlite_sync_status_v3__.get(addonKey) || {};
+    // Conservar la ventana original en reintentos para que el guard de versión no se relaje.
+    const keepWindow = previous.requestedAt && !previous.complete && !previous.degraded;
     globalThis.__sqlite_sync_status_v3__.set(addonKey, {
       ...previous,
-      requestedAt: Date.now(),
+      requestedAt: keepWindow ? previous.requestedAt : Date.now(),
       attempt: Number(attempt || 0),
       complete: false,
+      degraded: false,
       protocol: 0,
     });
     try { console.warn("[SQLITE_REQUEST_SYNC] " + JSON.stringify({ addon: addonKey, protocol: 3, attempt: Number(attempt || 0) })); } catch (e) {}
@@ -87,6 +142,8 @@ try {
   if (!globalThis.__sqlite_listener_callback_v3__) {
     const callback = function(event) {
     if (!event || (event.id !== "sqlite:load" && event.id !== "sqlite:sync" && event.id !== "sqlite:load_chunk" && event.id !== "sqlite:sync_complete")) return;
+    // Solo el demonio (consola del servidor) puede rehidratar; un jugador jamás debe inyectar estado.
+    if (event.sourceEntity && event.sourceEntity.typeId === "minecraft:player") return;
     try {
       const payload = JSON.parse(event.message || "{}");
       if (event.id === "sqlite:sync_complete") {
@@ -101,13 +158,14 @@ try {
             protocol: Number(payload.protocol || 0),
             entryCount: Number(payload.entryCount || 0),
           });
+          globalThis.__sqlite_flush_pending_v3__(addonKey);
         }
         return;
       }
       if (event.id === "sqlite:load_chunk") {
         const count = Number(payload.chunkCount);
         const index = Number(payload.chunkIndex);
-        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 128 || !Number.isInteger(index) || index < 0 || index >= count) return;
+        if (!payload.addon || payload.key === undefined || !payload.chunkId || !Number.isInteger(count) || count < 1 || count > 4096 || !Number.isInteger(index) || index < 0 || index >= count) return;
         const chunkKey = String(payload.chunkId);
         let state = globalThis.__sqlite_chunk_store_v2__.get(chunkKey);
         if (!state || state.count !== count) {
@@ -142,6 +200,17 @@ system.runTimeout(() => {
     if (!state || Number(state.protocol || 0) < 3) globalThis.__sqlite_request_sync_v3__("currency_addon", 1);
   } catch (e) {}
 }, 120);
+system.runTimeout(() => {
+  // Sin demonio (mundo importado sin bridge) se opera en modo degradado tras ~10s: RAM es la fuente de verdad.
+  try {
+    const state = globalThis.__sqlite_sync_status_v3__.get("currency_addon");
+    if (state && !state.complete) {
+      state.degraded = true;
+      globalThis.__sqlite_sync_complete_v2__.set("currency_addon", Date.now());
+      globalThis.__sqlite_flush_pending_v3__("currency_addon");
+    }
+  } catch (e) {}
+}, 200);
 // === FIN PERSISTENCIA SQLITE PUENTE V3 ===
 const patchShow = (prototype, originalShow) => {
   if (!prototype || !originalShow || originalShow.__isPatched) return;
@@ -320,8 +389,7 @@ function getAccountTier(player) {
 // Depósitos a Plazo Fijo / Certificados de Depósito (Feature 1)
 function getFixedDeposit(player) {
   const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", player, "bank_cd_data_v1");
-  if (!raw) return null;
-  try { return JSON.parse(raw); } catch (e) { return null; }
+  return globalThis.__sqlite_read_json_v3__(raw, null);
 }
 
 function setFixedDeposit(player, data) {
@@ -346,8 +414,7 @@ function toggleDebitCard(player) {
 // Banca de Clan (Feature 3)
 function getClanAccountRegistry() {
   const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_clan_accounts_v1");
-  if (!raw) return {};
-  try { return JSON.parse(raw); } catch (e) { return {}; }
+  return globalThis.__sqlite_read_json_v3__(raw, {});
 }
 
 function setClanAccountRegistry(registry) {
@@ -379,7 +446,7 @@ function getStockMarketData() {
   const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_stocks_market_v1");
   if (raw) {
     try {
-      const parsed = JSON.parse(raw);
+      const parsed = globalThis.__sqlite_read_json_v3__(raw);
       if (parsed && typeof parsed === "object") {
         const market = { lastUpdate: Number(parsed.lastUpdate) || Date.now() };
         for (const [key, config] of Object.entries(STOCK_MARKET_SECTORS)) {
@@ -453,10 +520,7 @@ system.runInterval(() => updateStockMarketIfDue("interval"), STOCK_MARKET_CHECK_
 
 function getPlayerPortfolio(player) {
   const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", player, "bank_player_stocks_v1");
-  if (raw) {
-    try { return JSON.parse(raw); } catch (e) {}
-  }
-  return { mining: 0, farming: 0, building: 0, trade: 0 };
+  return globalThis.__sqlite_read_json_v3__(raw, { mining: 0, farming: 0, building: 0, trade: 0 });
 }
 
 function setPlayerPortfolio(player, portfolio) {
@@ -508,8 +572,7 @@ function redeemCheckFromInventory(player) {
 // Nómina y Pagos Programados (Feature 4)
 function getPayrollsRegistry() {
   const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_payrolls_v1");
-  if (!raw) return [];
-  try { return JSON.parse(raw); } catch (e) { return []; }
+  return globalThis.__sqlite_read_json_v3__(raw, []);
 }
 
 function setPayrollsRegistry(payrolls) {
@@ -685,8 +748,7 @@ function getTotalDesignatedFunds() {
 // Portal de Transparencia y Rendición de Cuentas Públicas
 function getPublicStateLedger() {
   const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_public_hacienda_ledger_v1");
-  if (!raw) return [];
-  try { return JSON.parse(raw); } catch (e) { return []; }
+  return globalThis.__sqlite_read_json_v3__(raw, []);
 }
 
 function logPublicStateTransaction(type, amount, actor, details) {
@@ -918,7 +980,7 @@ function applyHistoricalEconomyRemediation() {
   let state;
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", ECONOMY_REMEDIATION_KEY);
-    state = raw ? JSON.parse(String(raw)) : null;
+    state = raw ? globalThis.__sqlite_read_json_v3__(raw) : null;
   } catch (e) {
     console.warn(`[ECONOMY_CRITICAL] remediation_state_invalid key=${ECONOMY_REMEDIATION_KEY}`);
     return false;
@@ -1064,6 +1126,10 @@ function transferScore(source, target, amount, reason = "transfer") {
     const sourceBefore = getScore(source);
     const targetBefore = getScore(target);
     if (sourceBefore < normalizedAmount) return { ok: false, reason: "insufficient_funds" };
+    // El capital de préstamos activos no puede transferirse: se valida contra el
+    // saldo disponible (saldo menos el bloqueo de préstamo) en la misma lectura.
+    const available = Math.max(0, sourceBefore - getLoanTransferLock(source));
+    if (normalizedAmount > available) return { ok: false, reason: "loan_funds_locked", available };
     if (targetBefore + normalizedAmount > MAX_OPERATIONAL_BALANCE) return { ok: false, reason: "target_limit" };
 
     const transferTaxRate = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "tax_transfer_rate_v1") ?? 2);
@@ -1603,7 +1669,7 @@ function updateGlobalAccountRegistry(playerName, savings, loan, cash = null) {
   try {
     let registry = {};
     const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_accounts_registry_v2");
-    if (raw) registry = JSON.parse(raw);
+    registry = globalThis.__sqlite_read_json_v3__(raw, {});
 
     const previous = registry[playerName];
     const nextSavings = Number(savings);
@@ -1645,7 +1711,7 @@ function logPlayerTransaction(playerName, type, amount, details) {
   try {
     let registry = {};
     const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_accounts_registry_v2");
-    if (raw) registry = JSON.parse(raw);
+    registry = globalThis.__sqlite_read_json_v3__(raw, {});
     
     if (!registry[playerName]) {
       registry[playerName] = { savings: 0, loan: 0, lastUpdate: Date.now(), history: [] };
@@ -1675,7 +1741,7 @@ function logPlayerTransaction(playerName, type, amount, details) {
 function getGlobalAccountRegistry() {
   try {
     const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_accounts_registry_v2");
-    if (raw) return JSON.parse(raw);
+    return globalThis.__sqlite_read_json_v3__(raw, {});
   } catch (e) {}
   return {};
 }
@@ -1862,7 +1928,7 @@ system.runInterval(() => {
           try {
             const rawZones = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "protecciones_db");
             if (rawZones) {
-              const zones = JSON.parse(rawZones);
+              const zones = globalThis.__sqlite_read_json_v3__(rawZones, []);
               if (Array.isArray(zones)) {
                 for (const z of zones) {
                   if (!z.isAdmin && z.owner && z.owner.toLowerCase() === player.name.toLowerCase()) {
@@ -2150,10 +2216,13 @@ function openBankStockMarketDialog(player) {
 
         modal.show(player).then((r) => {
           if (r.canceled) return;
+          if (!player.isValid) return;
           const sectorKeys = ["mining", "farming", "building", "trade"];
           const sectorKey = sectorKeys[r.formValues[0]] || "mining";
           const qty = parseQuantityHelper(r.formValues[1]);
-          const unitPrice = market[sectorKey].price;
+          // Revalidación atómica: la cotización pudo cambiar con el modal abierto.
+          const currentMarket = getStockMarketData();
+          const unitPrice = currentMarket[sectorKey].price;
           const totalCost = qty * unitPrice;
 
           if (isNaN(qty) || qty <= 0) {
@@ -2187,7 +2256,7 @@ function openBankStockMarketDialog(player) {
             const freshPortfolio = getPlayerPortfolio(player);
             freshPortfolio[sectorKey] = (freshPortfolio[sectorKey] || 0) + qty;
             setPlayerPortfolio(player, freshPortfolio);
-            playBankSound(player, "upgrade", `§aCompraste ${qty.toLocaleString()} acciones de ${market[sectorKey].name} por $${totalCost.toLocaleString()}.`);
+            playBankSound(player, "upgrade", `§aCompraste ${qty.toLocaleString()} acciones de ${currentMarket[sectorKey].name} por $${totalCost.toLocaleString()}.`);
             logPlayerTransaction(player.name, "Bolsa", totalCost, `Compra de ${qty} acc. (${sectorKey})`);
           } else {
             playBankSound(player, "error", "§cError al procesar el pago de acciones.");
@@ -2899,8 +2968,7 @@ function openQuickTransferByCBUDialog(player) {
 // === FACTURACIÓN Y SOLICITUDES DE COBRO (Feature 1) ===
 function getInvoicesRegistry() {
   const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_invoices_registry_v1");
-  if (!raw) return [];
-  try { return JSON.parse(raw); } catch (e) { return []; }
+  return globalThis.__sqlite_read_json_v3__(raw, []);
 }
 
 function setInvoicesRegistry(invoices) {
@@ -2908,6 +2976,54 @@ function setInvoicesRegistry(invoices) {
     globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_invoices_registry_v1", JSON.stringify(invoices));
   } catch (e) {}
 }
+
+// TTL y techo del registro de facturas: pagadas/rechazadas se conservan 30 días
+// como historial; las pendientes vencen a los 30 días y el registro completo
+// nunca supera las 1.000 entradas (se descartan primero las terminales viejas).
+const INVOICE_PENDING_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const INVOICE_HISTORY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const INVOICE_REGISTRY_LIMIT = 1000;
+const INVOICE_PURGE_INTERVAL_TICKS = 12000;
+
+function purgeInvoicesRegistry() {
+  try {
+    const invoices = getInvoicesRegistry();
+    if (!Array.isArray(invoices) || invoices.length === 0) return;
+    const now = Date.now();
+    let changed = false;
+    let retained = [];
+    for (const inv of invoices) {
+      if (!inv || typeof inv !== "object") { changed = true; continue; }
+      if (inv.status === "pending" && now - (Number(inv.timestamp) || 0) >= INVOICE_PENDING_TTL_MS) {
+        inv.status = "expired";
+        inv.resolvedAt = now;
+        changed = true;
+      }
+      if (inv.status !== "pending" && now - (Number(inv.resolvedAt ?? inv.timestamp) || 0) >= INVOICE_HISTORY_TTL_MS) {
+        changed = true;
+        continue;
+      }
+      retained.push(inv);
+    }
+    if (retained.length > INVOICE_REGISTRY_LIMIT) {
+      retained.sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
+      const overflow = retained.length - INVOICE_REGISTRY_LIMIT;
+      const dropped = new Set();
+      for (const inv of retained) {
+        if (dropped.size >= overflow) break;
+        if (inv.status !== "pending") dropped.add(inv);
+      }
+      for (const inv of retained) {
+        if (dropped.size >= overflow) break;
+        if (inv.status === "pending") dropped.add(inv);
+      }
+      retained = retained.filter(inv => !dropped.has(inv));
+      changed = true;
+    }
+    if (changed) setInvoicesRegistry(retained);
+  } catch (e) {}
+}
+system.runInterval(purgeInvoicesRegistry, INVOICE_PURGE_INTERVAL_TICKS);
 
 function openInvoicesMenuDialog(player) {
   const invoices = getInvoicesRegistry();
@@ -2971,6 +3087,7 @@ function openCreateInvoiceDialog(player) {
       status: "pending"
     };
 
+    purgeInvoicesRegistry();
     const invoices = getInvoicesRegistry();
     invoices.push(newInvoice);
     setInvoicesRegistry(invoices);
@@ -3042,52 +3159,65 @@ function openInvoiceDetailDialog(player, invoiceId) {
 
   form.show(player).then((res) => {
     if (res.canceled) return;
+    if (res.selection === 2) {
+      openPendingInvoicesDialog(player);
+      return;
+    }
+    // Revalidación atómica: la factura pudo pagarse o rechazarse con el modal abierto.
+    if (!player.isValid) return;
+    const currentInvoices = getInvoicesRegistry();
+    const currentIndex = currentInvoices.findIndex(i => i.id === invoiceId);
+    const currentInv = currentIndex === -1 ? null : currentInvoices[currentIndex];
+    if (!currentInv || currentInv.status !== "pending" || currentInv.receiverName.toLowerCase() !== player.name.toLowerCase()) {
+      player.sendMessage("§b§l[§6Banco§b§l]§r §cEsta factura ya no está pendiente de pago.");
+      return;
+    }
     if (res.selection === 0) {
       const currentHandBal = getScore(player);
-      if (currentHandBal < inv.amount) {
+      if (currentHandBal < currentInv.amount) {
         player.sendMessage("§b§l[§6Banco§b§l]§r §cNo tienes suficiente dinero en mano para pagar esta factura.");
         return;
       }
       const transferable = getAvailableTransferBalance(player);
-      if (inv.amount > transferable) {
+      if (currentInv.amount > transferable) {
         player.sendMessage(`§b§l[§6Banco§b§l]§r §cNo puedes pagar a otro jugador con dinero prestado. Disponible para transferir: §e$${transferable}§c.`);
         return;
       }
 
-      if (setScore(player, currentHandBal - inv.amount, "invoice_pay")) {
-        inv.status = "paid";
-        setInvoicesRegistry(invoices);
+      if (setScore(player, currentHandBal - currentInv.amount, "invoice_pay")) {
+        currentInv.status = "paid";
+        currentInv.resolvedAt = Date.now();
+        setInvoicesRegistry(currentInvoices);
 
-        const senderPlayer = world.getAllPlayers().find(p => p.name.toLowerCase() === inv.senderName.toLowerCase());
+        const senderPlayer = world.getAllPlayers().find(p => p.name.toLowerCase() === currentInv.senderName.toLowerCase());
         if (senderPlayer) {
-          setScore(senderPlayer, getScore(senderPlayer) + inv.amount, "invoice_receive");
-          playBankSound(senderPlayer, "upgrade", `§a¡Factura pagada por ${player.name}! Recibes $${inv.amount}`);
+          setScore(senderPlayer, getScore(senderPlayer) + currentInv.amount, "invoice_receive");
+          playBankSound(senderPlayer, "upgrade", `§a¡Factura pagada por ${player.name}! Recibes $${currentInv.amount}`);
         } else {
           const registry = getGlobalAccountRegistry();
-          if (!registry[inv.senderName]) {
-            registry[inv.senderName] = { cash: inv.amount, savings: 0, loan: 0, history: [] };
+          if (!registry[currentInv.senderName]) {
+            registry[currentInv.senderName] = { cash: currentInv.amount, savings: 0, loan: 0, history: [] };
           } else {
-            registry[inv.senderName].cash = (registry[inv.senderName].cash ?? 0) + inv.amount;
+            registry[currentInv.senderName].cash = (registry[currentInv.senderName].cash ?? 0) + currentInv.amount;
           }
           globalThis.__sqlite_set_prop_v2__("currency_addon", "world", "bank_accounts_registry_v2", JSON.stringify(registry));
         }
 
-        logPlayerTransaction(player.name, "Pago Factura", inv.amount, `Pago a ${inv.senderName}: ${inv.concept}`);
-        logPlayerTransaction(inv.senderName, "Cobro Factura", inv.amount, `Cobrado a ${player.name}`);
+        logPlayerTransaction(player.name, "Pago Factura", currentInv.amount, `Pago a ${currentInv.senderName}: ${currentInv.concept}`);
+        logPlayerTransaction(currentInv.senderName, "Cobro Factura", currentInv.amount, `Cobrado a ${player.name}`);
         playBankSound(player, "income", `§aFactura pagada exitosamente`);
-        player.sendMessage(`§b§l[§6Banco§b§l]§r §a¡Factura pagada! Se entregaron §e$${inv.amount}§a a §b${inv.senderName}§a.`);
+        player.sendMessage(`§b§l[§6Banco§b§l]§r §a¡Factura pagada! Se entregaron §e$${currentInv.amount}§a a §b${currentInv.senderName}§a.`);
       }
     } else if (res.selection === 1) {
-      inv.status = "rejected";
-      setInvoicesRegistry(invoices);
+      currentInv.status = "rejected";
+      currentInv.resolvedAt = Date.now();
+      setInvoicesRegistry(currentInvoices);
 
-      const senderPlayer = world.getAllPlayers().find(p => p.name.toLowerCase() === inv.senderName.toLowerCase());
+      const senderPlayer = world.getAllPlayers().find(p => p.name.toLowerCase() === currentInv.senderName.toLowerCase());
       if (senderPlayer) {
-        senderPlayer.sendMessage(`§b§l[§6Banco§b§l]§r §c${player.name} ha rechazado tu factura de $${inv.amount} (Concepto: ${inv.concept}).`);
+        senderPlayer.sendMessage(`§b§l[§6Banco§b§l]§r §c${player.name} ha rechazado tu factura de $${currentInv.amount} (Concepto: ${currentInv.concept}).`);
       }
       player.sendMessage("§b§l[§6Banco§b§l]§r §eHas rechazado la factura.");
-    } else {
-      openPendingInvoicesDialog(player);
     }
   }).catch(() => {});
 }
@@ -3101,7 +3231,7 @@ function openSentInvoicesHistoryDialog(player) {
     body += "§7No has emitido facturas de cobro recientemente.";
   } else {
     for (const inv of sent.slice(0, 10)) {
-      const statusIcon = inv.status === "paid" ? "✅ PAGADA" : inv.status === "rejected" ? "❌ RECHAZADA" : "⏳ PENDIENTE";
+      const statusIcon = inv.status === "paid" ? "✅ PAGADA" : inv.status === "rejected" ? "❌ RECHAZADA" : inv.status === "expired" ? "⌛ VENCIDA" : "⏳ PENDIENTE";
       body += `§f🧾 §b${inv.receiverName}§7 - §a$${inv.amount}§7 (${statusIcon})\n§8  ↳ ${inv.concept}\n\n`;
     }
   }
@@ -3117,8 +3247,7 @@ function openSentInvoicesHistoryDialog(player) {
 // === TARJETAS DE REGALO / VOUCHERS (Feature 4) ===
 function getGiftCardsRegistry() {
   const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_gift_cards_registry_v1");
-  if (!raw) return [];
-  try { return JSON.parse(raw); } catch (e) { return []; }
+  return globalThis.__sqlite_read_json_v3__(raw, []);
 }
 
 function setGiftCardsRegistry(cards) {
@@ -3300,8 +3429,7 @@ function openEconomicHealthDialog(player) {
 // Contratos de Contratistas y Pagos Programados por Tiempo
 function getContractorContractsRegistry() {
   const raw = globalThis.__sqlite_get_prop_v2__("currency_addon", "world", "bank_contractor_contracts_v1");
-  if (!raw) return [];
-  try { return JSON.parse(raw); } catch (e) { return []; }
+  return globalThis.__sqlite_read_json_v3__(raw, []);
 }
 
 function setContractorContractsRegistry(contracts) {
@@ -4160,26 +4288,36 @@ function openBankLoanRequestDialog(player) {
   modal.show(player).then((res) => {
     if (res.canceled) return;
     const val = Math.floor(Number(res.formValues[0]) || 0);
-    const vaultFunds = getVaultFunds();
 
     if (val <= 0 || isNaN(val)) {
       player.sendMessage("§b§l[§6Banco§b§l]§r §cMonto de préstamo inválido.");
       return;
     }
-    if (val > credit.maxLimit) {
-      player.sendMessage(`§b§l[§6Banco§b§l]§r §cTu límite de crédito aprobado según tu Score (${credit.score} pts) es de §e$${credit.maxLimit}§c.`);
+    // Revalidación atómica: saldo, deuda y límite pudieron cambiar con el modal abierto.
+    if (!player.isValid) return;
+    const currentLoan = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_LOAN_PROPERTY) ?? 0);
+    if (currentLoan > 0) {
+      player.sendMessage("§b§l[§6Banco§b§l]§r §cYa tienes un préstamo activo; amortízalo antes de solicitar otro.");
       return;
     }
+    const currentCredit = getPlayerCreditData(player);
+    if (val > currentCredit.maxLimit) {
+      player.sendMessage(`§b§l[§6Banco§b§l]§r §cTu límite de crédito aprobado según tu Score (${currentCredit.score} pts) es de §e$${currentCredit.maxLimit}§c.`);
+      return;
+    }
+    const vaultFunds = getVaultFunds();
     if (vaultFunds < val) {
       player.sendMessage(`§b§l[§6Banco§b§l]§r §cLa Bóveda Central no dispone de suficiente liquidez ($${vaultFunds}) para financiar tu préstamo.`);
       return;
     }
 
+    const currentHandBal = getScore(player);
+    const currentSavings = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_SAVINGS_PROPERTY) ?? 0);
     const debtAmount = Math.floor(val * LOAN_INTEREST_RATE);
     const dueDate = Date.now() + 7 * 24 * 60 * 60 * 1000;
 
-    if (setScore(player, handBal + val, "bank_loan_request")) {
-      setPlayerBankDetails(player, savings, debtAmount);
+    if (setScore(player, currentHandBal + val, "bank_loan_request")) {
+      setPlayerBankDetails(player, currentSavings, debtAmount);
       globalThis.__sqlite_set_prop_v2__("currency_addon", player, BANK_LOAN_TRANSFER_LOCK_PROPERTY, val);
       globalThis.__sqlite_set_prop_v2__("currency_addon", player, "bank_loan_due_date_v1", dueDate);
       globalThis.__sqlite_set_prop_v2__("currency_addon", player, "bank_skip_repay_until", Date.now() + 3000);
@@ -4257,15 +4395,23 @@ function openBankLoanRefinanceDialog(player) {
       player.sendMessage("§b§l[§6Banco§b§l]§r §cDebes escribir ACEPTAR para refinanciar.");
       return;
     }
-
+    // Revalidación atómica: la deuda pudo amortizarse parcialmente con el modal abierto.
+    if (!player.isValid) return;
+    const currentLoan = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_LOAN_PROPERTY) ?? 0);
+    if (currentLoan <= 0) {
+      player.sendMessage("§b§l[§6Banco§b§l]§r §aNo tienes deudas activas para refinanciar.");
+      return;
+    }
+    const currentFee = Math.floor(currentLoan * 0.02);
+    const currentNewLoan = currentLoan + currentFee;
     const newDueDate = Date.now() + 7 * 24 * 60 * 60 * 1000;
     const savings = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_SAVINGS_PROPERTY) ?? 0);
-    setPlayerBankDetails(player, savings, newLoan);
+    setPlayerBankDetails(player, savings, currentNewLoan);
     globalThis.__sqlite_set_prop_v2__("currency_addon", player, "bank_loan_due_date_v1", newDueDate);
 
-    logPlayerTransaction(player.name, "Refinanciación", fee, `Reestructuración a 7 días. Deuda final: $${newLoan}`);
+    logPlayerTransaction(player.name, "Refinanciación", currentFee, `Reestructuración a 7 días. Deuda final: $${currentNewLoan}`);
     playBankSound(player, "upgrade", "§a¡Deuda refinanciada!");
-    player.sendMessage(`§b§l[§6Banco§b§l]§r §a¡Refinanciación aprobada! Tu nuevo plazo es de §e7 días§a y la deuda refinanciada es de §c$${newLoan}§a.`);
+    player.sendMessage(`§b§l[§6Banco§b§l]§r §a¡Refinanciación aprobada! Tu nuevo plazo es de §e7 días§a y la deuda refinanciada es de §c$${currentNewLoan}§a.`);
   }).catch(() => {});
 }
 
@@ -4290,6 +4436,7 @@ function openBankLoanPaybackDialog(player) {
       player.sendMessage("§b§l[§6Banco§b§l]§r §cMonto a pagar inválido.");
       return;
     }
+    if (!player.isValid) return;
     const currentHandBal = getScore(player);
     const currentLoan = Number(globalThis.__sqlite_get_prop_v2__("currency_addon", player, BANK_LOAN_PROPERTY) ?? 0);
     if (currentLoan <= 0) {
@@ -4770,9 +4917,7 @@ function openBankModifyTargetValuesDialog(player, targetName) {
   const registry = getGlobalAccountRegistry();
   const account = registry[targetName];
   if (!account) return;
-  
-  const targetOnline = world.getAllPlayers().find(p => p.name.toLowerCase() === targetName.toLowerCase());
-  
+
   const modal = new ModalFormData()
     .title(`⚙️ Modificar: ${targetName}`)
     .textField("Fijar Ahorros en:", "Monto entero positivo", String(account.savings))
@@ -4780,23 +4925,28 @@ function openBankModifyTargetValuesDialog(player, targetName) {
     
   modal.show(player).then((res) => {
     if (res.canceled) return;
+    if (!player.isValid) return;
     const newSavings = Math.floor(Number(res.formValues[0]) || 0);
     const newLoan = Math.floor(Number(res.formValues[1]) || 0);
-    
+
     if (isNaN(newSavings) || newSavings < 0 || isNaN(newLoan) || newLoan < 0) {
       player.sendMessage("§b§l[§6Banco§b§l]§r §cValores ingresados inválidos.");
       return;
     }
-    
+
+    // Revalidación atómica: el saldo y la conexión del objetivo pudieron cambiar con el modal abierto.
+    const previousSavings = Number(getGlobalAccountRegistry()[targetName]?.savings ?? 0);
+    const currentTargetOnline = world.getAllPlayers().find(p => p.name.toLowerCase() === targetName.toLowerCase());
+
     updateGlobalAccountRegistry(targetName, newSavings, newLoan);
-    logPlayerTransaction(targetName, "Ajuste Admin", newSavings - account.savings, `Ahorros fijados a $${newSavings}, Deuda a $${newLoan}`);
-    
-    if (targetOnline && targetOnline.isValid) {
-      globalThis.__sqlite_set_prop_v2__("currency_addon", targetOnline, BANK_SAVINGS_PROPERTY, newSavings);
-      globalThis.__sqlite_set_prop_v2__("currency_addon", targetOnline, BANK_LOAN_PROPERTY, newLoan);
-      if (newLoan <= 0) globalThis.__sqlite_set_prop_v2__("currency_addon", targetOnline, BANK_LOAN_TRANSFER_LOCK_PROPERTY, undefined);
-      else globalThis.__sqlite_set_prop_v2__("currency_addon", targetOnline, BANK_LOAN_TRANSFER_LOCK_PROPERTY, Math.min(getLoanTransferLock(targetOnline), newLoan));
-      targetOnline.sendMessage(`§b§l[§6Banco§b§l]§r §eUn administrador ha actualizado tu estado bancario:\n§7- Ahorros: §b$${newSavings}\n§7- Deuda: §c$${newLoan}`);
+    logPlayerTransaction(targetName, "Ajuste Admin", newSavings - previousSavings, `Ahorros fijados a $${newSavings}, Deuda a $${newLoan}`);
+
+    if (currentTargetOnline && currentTargetOnline.isValid) {
+      globalThis.__sqlite_set_prop_v2__("currency_addon", currentTargetOnline, BANK_SAVINGS_PROPERTY, newSavings);
+      globalThis.__sqlite_set_prop_v2__("currency_addon", currentTargetOnline, BANK_LOAN_PROPERTY, newLoan);
+      if (newLoan <= 0) globalThis.__sqlite_set_prop_v2__("currency_addon", currentTargetOnline, BANK_LOAN_TRANSFER_LOCK_PROPERTY, undefined);
+      else globalThis.__sqlite_set_prop_v2__("currency_addon", currentTargetOnline, BANK_LOAN_TRANSFER_LOCK_PROPERTY, Math.min(getLoanTransferLock(currentTargetOnline), newLoan));
+      currentTargetOnline.sendMessage(`§b§l[§6Banco§b§l]§r §eUn administrador ha actualizado tu estado bancario:\n§7- Ahorros: §b$${newSavings}\n§7- Deuda: §c$${newLoan}`);
     }
     player.sendMessage(`§b§l[§6Banco§b§l]§r §aValores de §e${targetName}§a actualizados en la base de datos global: Ahorros = $${newSavings}, Deuda = $${newLoan}.`);
     openBankAuditTargetPlayerDialog(player, targetName);

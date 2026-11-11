@@ -14,7 +14,7 @@ export class AdminAnomalyDetector {
     if (!this.config.anomalyDetectionEnabled) return { suspicious: false };
     try {
       const raw = this.store.get(ANOMALY_KEY);
-      const state = raw ? JSON.parse(String(raw)) : { schemaVersion: 1, actors: {} };
+      const state = raw ? globalThis.__sqlite_read_json_v3__(raw) : { schemaVersion: 1, actors: {} };
       const cutoff = now - this.config.anomalyDetection.windowMs;
       const events = (Array.isArray(state.actors[principalId]) ? state.actors[principalId] : [])
         .filter((event) => Number(event.at) > cutoff);

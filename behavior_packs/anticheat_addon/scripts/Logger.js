@@ -3,6 +3,7 @@ import { Config } from "./Config.js";
 import { EvidenceOutbox } from "./EvidenceOutbox.js";
 import { ConsoleNdjsonSink } from "./ConsoleNdjsonSink.js";
 import { EvidencePacketBuilder } from "./EvidencePacketBuilder.js";
+import { playerKey } from "./Identity.js";
 
 export class Logger {
   static outbox = new EvidenceOutbox();
@@ -14,7 +15,7 @@ export class Logger {
 
   static logViolation(player, detector, score, observed, expected, action = "none", context = {}) {
     const now = Date.now();
-    const key = `${player.name}:${detector}`;
+    const key = `${playerKey(player)}:${detector}`;
     // Las acciones punitivas conservan su telemetría rápida; las observaciones
     // repetidas se limitan para no llenar la consola durante actividad normal.
     const cooldownMs = action === "punish" || action === "rollback"
@@ -104,10 +105,10 @@ export class Logger {
     }
   }
 
-  static clearPlayer(playerName) {
-    const prefix = `${playerName}:`;
-    for (const key of this.lastEmittedViolations.keys()) {
-      if (key.startsWith(prefix)) this.lastEmittedViolations.delete(key);
+  static clearPlayer(key) {
+    const prefix = `${key}:`;
+    for (const entryKey of this.lastEmittedViolations.keys()) {
+      if (entryKey.startsWith(prefix)) this.lastEmittedViolations.delete(entryKey);
     }
   }
 }

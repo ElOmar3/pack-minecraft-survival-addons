@@ -2,6 +2,7 @@ import { ErrorReporter } from "./ErrorReporter.js";
 import { Config } from "./Config.js";
 import { Logger } from "./Logger.js";
 import { system } from "@minecraft/server";
+import { playerKey } from "./Identity.js";
 
 export class ViolationManager {
   static violations = new Map();
@@ -41,9 +42,9 @@ export class ViolationManager {
 
   static addViolation(player, detector, value, expected, weight = 10, context = {}) {
     this.ensureHistoryLoaded();
-    const name = player.name;
+    const key = playerKey(player);
     const xuid = String(player.xuid || "").trim();
-    const current = this.violations.get(name) || { score: 0, lastUpdate: Date.now() };
+    const current = this.violations.get(key) || { score: 0, lastUpdate: Date.now() };
     
     // Aplicar decaimiento de puntos acumulados basado en el tiempo
     const timeDelta = (Date.now() - current.lastUpdate) / 1000;
@@ -51,7 +52,7 @@ export class ViolationManager {
     let newScore = Math.max(0, current.score - decay) + weight;
     newScore = Math.min(Config.violations.maxViolationScore, newScore);
 
-    this.violations.set(name, {
+    this.violations.set(key, {
       score: newScore,
       lastUpdate: Date.now()
     });
@@ -65,7 +66,7 @@ export class ViolationManager {
       action = "warn";
     }
 
-    const recent = this.recentDetections.get(name) || [];
+    const recent = this.recentDetections.get(key) || [];
     recent.push({
       timestamp: Date.now(),
       detector,
@@ -78,7 +79,7 @@ export class ViolationManager {
     if (recent.length > 20) {
       recent.shift();
     }
-    this.recentDetections.set(name, recent);
+    this.recentDetections.set(key, recent);
     if (xuid) {
       const xuidKey = `xuid:${xuid}`;
       const persisted = this.recentDetections.get(xuidKey) || [];
@@ -103,8 +104,8 @@ export class ViolationManager {
     return action;
   }
 
-  static getScore(playerName) {
-    const current = this.violations.get(playerName);
+  static getScore(key) {
+    const current = this.violations.get(key);
     if (!current) return 0;
     
     const timeDelta = (Date.now() - current.lastUpdate) / 1000;
@@ -112,15 +113,15 @@ export class ViolationManager {
     return Math.max(0, current.score - decay);
   }
 
-  static clearPlayer(playerName) {
-    this.violations.delete(playerName);
-    this.recentDetections.delete(playerName);
-    Logger.clearPlayer(playerName);
+  static clearPlayer(key) {
+    this.violations.delete(key);
+    this.recentDetections.delete(key);
+    Logger.clearPlayer(key);
   }
 
-  static getRecentDetections(playerName, xuid = "") {
+  static getRecentDetections(key, xuid = "") {
     this.ensureHistoryLoaded();
-    const live = this.recentDetections.get(playerName) || [];
+    const live = this.recentDetections.get(key) || [];
     const persisted = xuid ? (this.recentDetections.get(`xuid:${xuid}`) || []) : [];
     return live.length >= persisted.length ? live : persisted;
   }

@@ -17,6 +17,7 @@ import { FallEpisodeStateMachine } from "./features/nofall/FallEpisodeStateMachi
 import { NoFallFeatureExtractor } from "./features/nofall/NoFallFeatureExtractor.js";
 import { ExpectedFallDamageProvider } from "./features/nofall/ExpectedFallDamageProvider.js";
 import { ViolationManager } from "./ViolationManager.js";
+import { playerKey } from "./Identity.js";
 function safeGetBlock(dim, loc) {
   try {
     return dim.getBlock(loc);
@@ -45,7 +46,7 @@ export class MovementAnalyzer {
     const gameMode = player.getGameMode ? player.getGameMode() : "survival";
     if (gameMode === "creative" || gameMode === "spectator") return;
 
-    const name = player.name;
+    const name = playerKey(player);
     const currentLoc = player.location;
     const onGround = player.isOnGround;
     // Estas propiedades pueden no existir en @minecraft/server 2.0.0; usar fallback seguro
