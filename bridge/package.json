@@ -19,7 +19,7 @@
   "author": "Pacífico Comunitario Team",
   "license": "MIT",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.5.0"
   },
   "optionalDependencies": {
     "better-sqlite3": "^11.0.0"

@@ -30,3 +30,8 @@ Thumbs.db
 
 # Temporary files
 *.tmp
+
+# Secretos de aprovisionamiento y credenciales (la plantilla .example.js sí se versiona)
+behavior_packs/fcx_limited_admin/scripts/config/OwnerProvisioning.js
+.env
+.env.*

@@ -220,6 +220,8 @@ class AddonDatabase {
     } catch (err) {
       try { this.db.exec("ROLLBACK;"); } catch (e) {}
       console.error("[SQLite Bridge] ERROR en flushSync:", err.message);
+      // Reencolar para no perder el lote ante un fallo transitorio de disco.
+      this.writeQueue.unshift(...batch);
     }
   }
 
