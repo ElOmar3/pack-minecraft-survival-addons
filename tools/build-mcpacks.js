@@ -9,6 +9,9 @@
  *   - Exclusión de secretos y artefactos de runtime: OwnerProvisioning.js (claves
  *     HMAC/nonce en vivo), .env, node_modules, *.db, logs, etc. La plantilla
  *     OwnerProvisioning.example.js SÍ se distribuye.
+ *   - Defaults seguros: cuando un import estático apunta a un archivo excluido
+ *     (p. ej. config/OwnerProvisioning.js), se inyecta en el ZIP una copia byte a
+ *     byte de su plantilla .example.js para que el pack cargue sin el secreto.
  *   - Verificación integrada: relee el ZIP generado, comprueba separadores,
  *     exclusiones y CRC32 de cada entrada antes de dar el build por bueno.
  *
@@ -38,6 +41,14 @@ function isExcluded(relPosix) {
   if (EXCLUDED_SUFFIXES.some(s => base.endsWith(s))) return true;
   return false;
 }
+
+// === Defaults seguros inyectados en lugar de los secretos excluidos ===
+// El pack distribuido debe resolver los imports estáticos sin el archivo secreto:
+// se inyecta una copia exacta de la plantilla versionada (enabled: false) en la
+// ruta del import. El secreto real nunca entra al ZIP.
+const SAFE_DEFAULTS = [
+  { rel: "scripts/config/OwnerProvisioning.js", template: "scripts/config/OwnerProvisioning.example.js" },
+];
 
 // === CRC32 (IEEE 802.3) ===
 const CRC_TABLE = (() => {
@@ -93,7 +104,7 @@ function buildZip(entries) {
   for (const entry of entries) {
     const nameBuf = Buffer.from(entry.rel, "utf8");
     const { time, day } = dosDateTime(entry.mtime);
-    const raw = entry.isDir ? Buffer.alloc(0) : fs.readFileSync(entry.abs);
+    const raw = entry.isDir ? Buffer.alloc(0) : (entry.content ?? fs.readFileSync(entry.abs));
     const crc = crc32(raw);
     let method = 8;
     let data = entry.isDir ? raw : zlib.deflateRawSync(raw, { level: 9 });
@@ -145,7 +156,7 @@ function buildZip(entries) {
 }
 
 // === Verificación: relee el ZIP y valida separadores, exclusiones y CRC ===
-function verifyZip(buf, expectedCount) {
+function verifyZip(buf, expectedCount, injected = new Map()) {
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 22 - 65536); i--) {
     if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
@@ -166,7 +177,8 @@ function verifyZip(buf, expectedCount) {
     const localOff = buf.readUInt32LE(off + 42);
     const name = buf.slice(off + 46, off + 46 + nameLen).toString("utf8");
     if (name.includes("\\")) throw new Error(`separador no POSIX: ${name}`);
-    if (isExcluded(name.replace(/\/$/, ""))) throw new Error(`archivo excluido presente: ${name}`);
+    const injectedExpected = injected.get(name);
+    if (!injectedExpected && isExcluded(name.replace(/\/$/, ""))) throw new Error(`archivo excluido presente: ${name}`);
     const localNameLen = buf.readUInt16LE(localOff + 26);
     const localExtraLen = buf.readUInt16LE(localOff + 28);
     const dataStart = localOff + 30 + localNameLen + localExtraLen;
@@ -174,6 +186,7 @@ function verifyZip(buf, expectedCount) {
     const raw = method === 8 ? zlib.inflateRawSync(data) : data;
     if (raw.length !== rawSize) throw new Error(`tamaño incorrecto: ${name}`);
     if (crc32(raw) !== crc) throw new Error(`CRC incorrecto: ${name}`);
+    if (injectedExpected && !raw.equals(injectedExpected)) throw new Error(`el default inyectado no coincide con la plantilla segura: ${name}`);
     off += 46 + nameLen + extraLen + commentLen;
   }
   return count;
@@ -195,6 +208,15 @@ for (const pack of packs) {
       console.warn(`! ${pack}: sin manifest.json (se empaqueta igual)`);
     }
     const entries = collectEntries(packPath);
+    const injected = new Map();
+    for (const def of SAFE_DEFAULTS) {
+      const templateAbs = path.join(packPath, def.template);
+      if (!fs.existsSync(templateAbs)) continue;
+      if (entries.some(e => e.rel === def.rel)) continue;
+      const content = fs.readFileSync(templateAbs);
+      entries.push({ rel: def.rel, abs: templateAbs, isDir: false, mtime: fs.statSync(templateAbs).mtime, content });
+      injected.set(def.rel, content);
+    }
     const all = [];
     (function countAll(absDir, relDir) {
       for (const name of fs.readdirSync(absDir)) {
@@ -209,10 +231,11 @@ for (const pack of packs) {
     excludedTotal += excluded.length;
 
     const zip = buildZip(entries);
-    const verified = verifyZip(zip, entries.length);
+    const verified = verifyZip(zip, entries.length, injected);
     fs.writeFileSync(target, zip);
     const note = excluded.length > 0 ? ` [excluidos: ${excluded.join(", ")}]` : "";
-    console.log(`✓ ${pack}.mcpack (${verified} entradas, ${(zip.length / 1024).toFixed(1)} KB)${note}`);
+    const injNote = injected.size > 0 ? ` [default seguro: ${[...injected.keys()].join(", ")}]` : "";
+    console.log(`✓ ${pack}.mcpack (${verified} entradas, ${(zip.length / 1024).toFixed(1)} KB)${note}${injNote}`);
   } catch (err) {
     failures++;
     console.error(`✗ ${pack}.mcpack: ${err.message}`);
