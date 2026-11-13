@@ -784,6 +784,11 @@ function isProtectedBlockInteraction(block) {
   );
 }
 
+function isDoorOrGateBlock(block) {
+  const id = String(block?.typeId || "").toLowerCase();
+  return id.includes("door") || id.includes("trapdoor") || id.includes("fence_gate") || id.includes("gate");
+}
+
 function isLockedSignAt(pos, dimId) {
   const zones = getZonesAt(pos, dimId);
   return zones.length > 0 && zones.some((zone) => zone.isAdmin || zone.isCommunity === true || zone.zoneType === "community");
